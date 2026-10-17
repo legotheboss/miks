@@ -37,10 +37,13 @@ so before doing it to the real one.
   paths at 104 bytes.
 - `yarn install:app` builds Miks.app, signs it with the keychain's Developer
   ID (a stable signature is what keeps the permissions macOS grants Miks, and
-  so everything in its terminals, across reinstalls), and swaps it into
-  /Applications, relaunching it if it was running. It quits only the UI, found
-  by bundle ID: the daemon runs on the same binary, so never `pkill -x Miks`.
-  The running daemon keeps its old code until it next starts.
+  so everything in its terminals, across reinstalls), and rsyncs it over
+  /Applications/Miks.app in place, relaunching it if it was running. In place,
+  because the daemon outlives installs and macOS names it after wherever its
+  bundle is: a bundle moved to the Trash turned permission prompts into
+  "Miks 11-23-24-642". It quits only the UI, found by pid, excluding the
+  daemon: never `pkill -x Miks`. The running daemon keeps its old code until
+  it next starts.
 - Real state lives in `~/Library/Application Support/Miks` (socket,
   `daemon.log`, `state.json`, and Electron's profile in `UI/`). The daemon
   saves its layout to `state.json` (each tab's cwd, via `lsof`, and its Claude

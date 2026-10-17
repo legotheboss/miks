@@ -191,13 +191,14 @@ if (wasRunning) {
   if (running.some(alive)) throw new Error("Miks didn't quit; quit it and run this again.");
 }
 
-if (fs.existsSync(installPath)) {
-  console.log(`Moving the old ${installPath} to the Trash…`);
-  run("trash", [installPath]);
-}
-
+// Updated in place, not swapped for a new bundle: the daemon keeps running
+// from this bundle across installs, and macOS names it (in permission
+// prompts, say) after wherever that bundle is. Moved to the Trash, it showed
+// up as "Miks 11-23-24-642". rsync writes each file under a temporary name
+// and renames it into place, so running processes keep the files they have.
 console.log(`Installing ${installPath}…`);
-run("ditto", [builtApp, installPath]);
+run("rsync", ["-a", "--delete", `${builtApp}/`, `${installPath}/`]);
+run("codesign", ["--verify", "--deep", "--strict", installPath]);
 
 if (wasRunning) {
   console.log("Relaunching Miks…");
