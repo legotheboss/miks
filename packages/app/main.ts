@@ -387,8 +387,8 @@ function buildMenu() {
       submenu: [
         command("nextTab", "CmdOrCtrl+Shift+]", "Next tab"),
         command("previousTab", "CmdOrCtrl+Shift+[", "Previous tab"),
-        command("nextWorkspace", "CmdOrCtrl+Alt+Down", "Next workspace"),
-        command("previousWorkspace", "CmdOrCtrl+Alt+Up", "Previous workspace"),
+        command("nextWorkspace", "CmdOrCtrl+Shift+Down", "Next workspace"),
+        command("previousWorkspace", "CmdOrCtrl+Shift+Up", "Previous workspace"),
         { type: "separator" },
         ...Array.from({ length: 9 }, (_, i) => command(`workspace${i + 1}`, `CmdOrCtrl+${i + 1}`, `Workspace ${i + 1}`)),
         { type: "separator" },
