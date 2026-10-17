@@ -98,7 +98,8 @@ fs.writeFileSync(updatePath, JSON.stringify({ currentRelease: version, releases:
 // Publish.
 //
 
-run("git", ["commit", "-m", `Release ${tag}`, appPackagePath]);
+// Already at this version (a first release, or a retry), there's no bump.
+if (output("git", ["status", "--porcelain", appPackagePath])) run("git", ["commit", "-m", `Release ${tag}`, appPackagePath]);
 run("git", ["tag", tag]);
 run("git", ["push", "origin", "HEAD", tag]);
 
