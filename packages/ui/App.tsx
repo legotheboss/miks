@@ -1,6 +1,7 @@
 import { colors } from "crosswing/colors";
 import { fonts } from "crosswing/fonts";
 import { useMatchMedia } from "crosswing/hooks/useMatchMedia";
+import { useDialog } from "crosswing/modals/dialog";
 import type { AgentStatus, DaemonState } from "miks/shared/protocol";
 import { DEFAULT_SETTINGS } from "miks/shared/settings";
 import { useEffect, useRef } from "react";
@@ -10,12 +11,23 @@ import { getSettings, setFontSize, useSettings } from "./settings";
 import { Sidebar } from "./Sidebar";
 import { workspaceTitle } from "./status";
 import { TabBar } from "./TabBar";
+import { SettingsDialog } from "./SettingsDialog";
 import { TERMINAL_BACKGROUND, TerminalView } from "./TerminalView";
 
 export function App() {
   const { state, connected, error } = useDaemon();
 
-  useEffect(() => daemon.onCommand(runCommand), []);
+  const settingsDialog = useDialog(() => <SettingsDialog onClose={settingsDialog.hide} />);
+
+  useEffect(() => {
+    const handle = (command: string) => (command === "settings" ? settingsDialog.show() : runCommand(command));
+
+    // In development, `window.miksCommand("newTab")` runs a menu command, for
+    // checking them from DevTools (menu shortcuts can't be sent from there).
+    if (import.meta.env.DEV) (window as any).miksCommand = handle;
+
+    return daemon.onCommand(handle);
+  }, [settingsDialog]);
   useSeenTracking(state);
   useAppearanceReporting(connected);
   useAgentNotifications(state);

@@ -27,8 +27,11 @@ const INHERITED_ENV_BLOCKLIST = [
   /^CMUX_/,
   /^GHOSTTY_/,
   /^TERM_PROGRAM/,
-  /^CLAUDECODE$/,
-  /^CLAUDE_CODE_ENTRYPOINT$/,
+  // Everything Claude Code marks its own subprocesses with. Inherited, it
+  // makes a `claude` in our pane a child session that saves no transcript (so
+  // can't be resumed), or one that refuses to start inside "another" one.
+  // Settings you keep in your shell profile come back with the login shell.
+  /^CLAUDE/,
   // Miks's own: each pane sets its own MIKS_PANE_ID and MIKS_SOCKET, and the
   // dev build's MIKS_UI_URL would point any Miks.app launched from a pane at
   // the dev server.

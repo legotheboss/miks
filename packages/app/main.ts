@@ -1,5 +1,5 @@
 import { spawn } from "child_process";
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } from "electron";
 import type { MenuItemConstructorOptions, WebContents } from "electron";
 import fs from "fs";
 import http from "http";
@@ -181,7 +181,7 @@ function createWindow() {
     minHeight: 300,
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 14, y: 14 },
-    backgroundColor: "#1a1b1e",
+    backgroundColor: windowBackground(),
     webPreferences: {
       preload: path.join(import.meta.dirname, "preload.cjs"),
       contextIsolation: true,
@@ -206,21 +206,29 @@ function createWindow() {
     return { action: "deny" };
   });
 
-  loadUI(window);
+  const devUrl = process.env.MIKS_UI_URL;
+  if (devUrl) window.loadURL(devUrl);
+  else window.loadFile(path.join(root, "packages/ui/dist/index.html"));
+
   mainWindow = window;
   window.on("closed", () => {
     if (mainWindow === window) mainWindow = null;
   });
 }
 
-/** Loads the UI, at `#hash` for windows other than the main one. */
-function loadUI(window: BrowserWindow, hash?: string) {
-  const devUrl = process.env.MIKS_UI_URL;
-  if (devUrl) window.loadURL(hash ? `${devUrl}#${hash}` : devUrl);
-  else window.loadFile(path.join(root, "packages/ui/dist/index.html"), { hash });
+let mainWindow: BrowserWindow | null = null;
+
+/**
+ * What the window shows before the page paints: the UI's own background for
+ * the current appearance, so a launch doesn't flash the wrong one.
+ */
+function windowBackground(): string {
+  return nativeTheme.shouldUseDarkColors ? "#1a1b1e" : "#ffffff";
 }
 
-let mainWindow: BrowserWindow | null = null;
+nativeTheme.on("updated", () => {
+  for (const window of BrowserWindow.getAllWindows()) window.setBackgroundColor(windowBackground());
+});
 
 // A notification was clicked: bring Miks forward.
 ipcMain.on("miks:focus", () => {
@@ -256,28 +264,6 @@ ipcMain.on("miks:setSettings", (_event, changes: Partial<Settings>) => {
   for (const window of BrowserWindow.getAllWindows()) window.webContents.send("miks:settings", settings);
 });
 
-let preferencesWindow: BrowserWindow | null = null;
-
-function openPreferences() {
-  if (preferencesWindow) return preferencesWindow.focus();
-
-  preferencesWindow = new BrowserWindow({
-    width: 520,
-    height: 300,
-    resizable: false,
-    minimizable: false,
-    fullscreenable: false,
-    title: "Settings",
-    backgroundColor: "#1a1b1e",
-    webPreferences: {
-      preload: path.join(import.meta.dirname, "preload.cjs"),
-      contextIsolation: true,
-      sandbox: true,
-    },
-  });
-  loadUI(preferencesWindow, "preferences");
-  preferencesWindow.on("closed", () => (preferencesWindow = null));
-}
 
 //
 // The menu. Accelerators reach us before the terminal sees the keystroke,
@@ -299,7 +285,7 @@ function buildMenu() {
       submenu: [
         { role: "about" },
         { type: "separator" },
-        { label: "Settings…", accelerator: "CmdOrCtrl+,", click: () => openPreferences() },
+        command("settings", "CmdOrCtrl+,", "Settings…"),
         { type: "separator" },
         {
           label: "Restart daemon…",

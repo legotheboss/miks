@@ -1,11 +1,10 @@
-// @chatwing
-import { getCoordinate, hasTouchIdentifier, isTouchEvent } from "crosswing/components/touchUtils";
-import { ModalContext } from "crosswing/modals/context";
-import { Seconds } from "crosswing/shared/timespan";
+import { getCoordinate, hasTouchIdentifier, isTouchEvent } from "../touchUtils.js";
+import { ModalContext } from "../../modals/context/ModalContext.js";
+import { Seconds } from "../../shared/timespan.js";
 import { use, useEffect, useRef, useState } from "react";
-import { DragManager, DragManagerOptions, DragStartHandler, DropHandler } from "./DragManager";
-import { EdgeScroller } from "./EdgeScroller";
-import { findAncestor } from "./draggableUtils";
+import { DragManager, DragManagerOptions, DragStartHandler, DropHandler } from "./DragManager.js";
+import { EdgeScroller } from "./EdgeScroller.js";
+import { findAncestor } from "./draggableUtils.js";
 
 const log = (...args: any[]) => {};
 

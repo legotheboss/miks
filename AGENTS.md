@@ -86,23 +86,31 @@ resizes); keep it passing.
   tabs attach without a size and adopt the pane's.
 - Only attached clients answer terminal queries (the headless emulator's
   replies are dropped, as in VS Code), so each query gets one answer.
-- Panes strip `CMUX_*`, `GHOSTTY_*`, `TERM_PROGRAM*`, `CLAUDECODE`,
+- Panes strip `CMUX_*`, `GHOSTTY_*`, `TERM_PROGRAM*`, `CLAUDE*`,
   `ELECTRON_*` and inherited `MIKS_*` from the daemon's environment, or
-  programs inside think they're in cmux or another Claude Code, Electron apps
-  start as plain Node, and a Miks.app launched from a pane loads the dev
-  server.
+  programs inside think they're in cmux, Electron apps start as plain Node, a
+  Miks.app launched from a pane loads the dev server, and Claude Code, seeing
+  `CLAUDE_CODE_CHILD_SESSION` from the session that launched Miks, saves no
+  transcripts (so nothing can be resumed). install-app relaunches with a
+  clean environment for the same reason.
 
 # UI notes
 
 - Settings (`miks/shared/settings`) live in `settings.json`, owned by the
   Electron main process and pushed to every window; not localStorage, which
   is per origin, so the dev build and Miks.app would each have their own.
-  The Settings window (⌘,) is the same UI loaded at `#preferences`.
-- Drag to reorder uses chatwing's draggable (`packages/ui/draggable`, copied
-  from harbor with one marked change: collapsing along the x axis for the tab
-  bar). It needs a `data-draggable-root` ancestor and logs an error, rather
-  than failing loudly, without one. The dragged copy is placed outside its
-  list, so draggable items must be styled on their own, not from the parent.
+  Settings (⌘,) is a crosswing dialog; a dialog must take focus from the
+  terminal, or keys (Escape included) go to the shell behind it.
+- In dev, `window.miksCommand("<name>")` runs a menu command from DevTools,
+  where menu shortcuts can't be sent.
+- Drag to reorder is `crosswing/components/draggable`, moved from chatwing
+  (where seven projects still have their own copy) and not yet in central
+  crosswing: `wings sync` reports it as Creates awaiting approval. It needs a
+  `data-draggable-root` ancestor, and only logs an error without one. The
+  dragging copy is placed outside its list and sized from the item's border
+  box: style items on their own, not from the parent, and put spacing inside
+  them (padding around an inner box), never margins, or the copy grows and
+  the list shifts.
 - Notifications come from the renderer (`useAgentNotifications` in
   `App.tsx`): only for status changes seen while connected, and not for the
   tab on screen in a focused window.

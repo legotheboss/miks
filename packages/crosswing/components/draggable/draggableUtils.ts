@@ -1,4 +1,3 @@
-// @chatwing
 export function findAncestor(
   element: Element | null,
   attribute: string,

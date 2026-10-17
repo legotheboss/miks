@@ -1,6 +1,5 @@
-// @chatwing
-import { Coordinate } from "crosswing/components/touchUtils";
-import { findScrollable } from "../scrollIntoView";
+import { Coordinate } from "../touchUtils.js";
+import { findScrollable } from "../scrollIntoView.js";
 
 export class EdgeScroller {
   // If we are contained with a scrollable ancestor, we can scroll it when

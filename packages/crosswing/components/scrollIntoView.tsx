@@ -1,5 +1,4 @@
-// @chatwing
-import { smoothScroll } from "crosswing/host/util/smoothScroll";
+import { smoothScroll } from "../host/util/smoothScroll.js";
 
 /**
  * Scrolls the given element into view by way of adjusting the nearest

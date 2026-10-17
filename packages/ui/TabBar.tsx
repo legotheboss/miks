@@ -5,7 +5,7 @@ import type { Tab, Workspace } from "miks/shared/protocol";
 import { Fragment, HTMLAttributes } from "react";
 import { styled } from "styled-components";
 import { daemon } from "./daemon";
-import { useDraggable } from "./draggable/useDraggable";
+import { useDraggable } from "crosswing/components/draggable/useDraggable";
 import { dropIndex } from "./Sidebar";
 import { tabTitle } from "./status";
 import { StatusDot } from "./StatusDot";
@@ -96,93 +96,108 @@ function TabView({ tab, workspaceId, active }: { tab: Tab; workspaceId: string; 
       onClick={() => daemon.send({ type: "select", workspaceId, tabId: tab.id })}
       onAuxClick={(event) => event.button === 1 && daemon.send({ type: "closeTab", tabId: tab.id })}
     >
-      {tab.agent && <StatusDot status={tab.agent.status} />}
-      <div className="title">{tabTitle(tab)}</div>
-      <button
-        className="close"
-        title="Close tab (⌘W)"
-        // Not a drag: closing should work on a quick click.
-        onMouseDown={(event) => event.stopPropagation()}
-        onClick={(event) => {
-          event.stopPropagation();
-          daemon.send({ type: "closeTab", tabId: tab.id });
-        }}
-      >
-        <X />
-      </button>
+      <div className="box">
+        {tab.agent && <StatusDot status={tab.agent.status} />}
+        <div className="title">{tabTitle(tab)}</div>
+        <button
+          className="close"
+          title="Close tab (⌘W)"
+          // Not a drag: closing should work on a quick click.
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            daemon.send({ type: "closeTab", tabId: tab.id });
+          }}
+        >
+          <X />
+        </button>
+      </div>
     </StyledTab>
   );
 }
 
 // Styled on its own, not from inside the bar: the copy that follows the
 // pointer while dragging is put outside the bar, and must still look the part.
+// Its spacing is padding inside its border box, with the visuals on .box, so
+// that copy (sized from the border box) matches and nothing shifts.
 const StyledTab = styled.div`
   display: flex;
-  align-items: center;
   flex-shrink: 1;
-  gap: 7px;
   box-sizing: border-box;
   min-width: 0;
-  max-width: 220px;
-  height: 26px;
-  padding: 0 6px 0 10px;
-  border-radius: 7px;
+  max-width: 222px;
+  padding: 0 1px;
   cursor: default;
-  color: ${colors.textSecondary()};
   -webkit-app-region: no-drag;
 
-  &:hover {
-    background: ${colors.buttonBackgroundGlow()};
-  }
-
-  &[data-active="true"] {
-    background: ${colors.linkActiveBackground()};
-    color: ${colors.text()};
-  }
-
-  &[data-dragging="true"] {
-    background: ${colors.textBackgroundPanel()};
-    color: ${colors.text()};
-    box-shadow: 0 4px 14px rgb(0 0 0 / 0.25);
-  }
-
-  > .title {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font: ${fonts.display({ size: 12 })};
-  }
-
-  > .close {
+  > .box {
     display: flex;
-    padding: 2px;
-    border: none;
-    border-radius: 4px;
-    background: transparent;
-    color: inherit;
-    opacity: 0;
-
-    > svg {
-      width: 13px;
-      height: 13px;
-    }
+    align-items: center;
+    gap: 7px;
+    box-sizing: border-box;
+    min-width: 0;
+    flex-grow: 1;
+    height: 26px;
+    padding: 0 6px 0 10px;
+    border-radius: 7px;
+    color: ${colors.textSecondary()};
 
     &:hover {
       background: ${colors.buttonBackgroundGlow()};
     }
+
+    > .title {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font: ${fonts.display({ size: 12 })};
+    }
+
+    > .close {
+      display: flex;
+      padding: 2px;
+      border: none;
+      border-radius: 4px;
+      background: transparent;
+      color: inherit;
+      opacity: 0;
+
+      > svg {
+        width: 13px;
+        height: 13px;
+      }
+
+      &:hover {
+        background: ${colors.buttonBackgroundGlow()};
+      }
+    }
+
+    &:hover > .close {
+      opacity: 0.7;
+    }
   }
 
-  &:hover > .close,
-  &[data-active="true"] > .close {
-    opacity: 0.7;
+  &[data-active="true"] > .box {
+    background: ${colors.linkActiveBackground()};
+    color: ${colors.text()};
+
+    > .close {
+      opacity: 0.7;
+    }
+  }
+
+  &[data-dragging="true"] > .box {
+    background: ${colors.textBackgroundPanel()};
+    color: ${colors.text()};
+    box-shadow: 0 4px 14px rgb(0 0 0 / 0.25);
   }
 `;
 
 const TabDropTarget = styled.div`
   flex-shrink: 0;
   align-self: center;
-  width: var(--target-width, 2px);
+  width: var(--target-width, 0px);
   height: 26px;
   border-radius: 7px;
   -webkit-app-region: no-drag;

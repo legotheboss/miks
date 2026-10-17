@@ -123,8 +123,10 @@ export function TerminalView({
 
     prepareActive(view.terminal, view.fit);
     view.terminal.focus();
+    activeTerminal = view.terminal;
 
     return () => {
+      if (activeTerminal === view.terminal) activeTerminal = null;
       webglAddons.get(view.terminal)?.dispose();
       webglAddons.delete(view.terminal);
     };
@@ -156,6 +158,13 @@ export function TerminalView({
 function shellEscape(path: string): string {
   // Only ASCII characters the shell treats specially; "é" stays as it is.
   return path.replace(/[\s!"#$&'()*;<>?[\\\]^`{|}~]/g, "\\$&");
+}
+
+let activeTerminal: Terminal | null = null;
+
+/** Gives the keyboard back to the terminal on screen (after a dialog, say). */
+export function focusActiveTerminal() {
+  activeTerminal?.focus();
 }
 
 /**

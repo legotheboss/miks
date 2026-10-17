@@ -5,7 +5,7 @@ import { Workspace } from "miks/shared/protocol";
 import { Fragment, HTMLAttributes, KeyboardEvent, useState } from "react";
 import { styled } from "styled-components";
 import { daemon } from "./daemon";
-import { useDraggable } from "./draggable/useDraggable";
+import { useDraggable } from "crosswing/components/draggable/useDraggable";
 import { displayPath, useSettings } from "./settings";
 import { STATUS_LABELS, waitingMessage, workspaceStatus, workspaceTitle } from "./status";
 import { StatusDot } from "./StatusDot";
@@ -119,7 +119,7 @@ export function dropIndex(items: { id: string }[], movingId: string, target: str
 /** The gap a dragged row opens up where it would land. */
 export const WorkspaceDropTarget = styled.div`
   flex-shrink: 0;
-  height: var(--target-height, 2px);
+  height: var(--target-height, 0px);
   border-radius: 8px;
 
   &[data-draggable-hover="true"] {
@@ -165,119 +165,129 @@ function WorkspaceRow({
       onDoubleClick={() => setRenaming(true)}
       title="Double-click to rename"
     >
-      <div className="top">
-        {renaming ? (
-          <input
-            autoFocus
-            defaultValue={workspace.title ?? ""}
-            placeholder={title}
-            onKeyDown={onRenameKeyDown}
-            onBlur={() => setRenaming(false)}
-            onClick={(event) => event.stopPropagation()}
-          />
-        ) : (
-          <div className="title">{title}</div>
-        )}
-        {shortcut && !renaming && <div className="shortcut">{shortcut}</div>}
-      </div>
-      <div className="cwd" title={cwd}>
-        {displayPath(cwd, hidePathPrefix, home)}
-      </div>
-      <div className="bottom">
-        {status && <StatusDot status={status} />}
-        <div className="detail">
-          {message ?? (status ? STATUS_LABELS[status] : plural(workspace.tabs.length, "tab"))}
+      <div className="box">
+        <div className="top">
+          {renaming ? (
+            <input
+              autoFocus
+              defaultValue={workspace.title ?? ""}
+              placeholder={title}
+              onKeyDown={onRenameKeyDown}
+              onBlur={() => setRenaming(false)}
+              onClick={(event) => event.stopPropagation()}
+            />
+          ) : (
+            <div className="title">{title}</div>
+          )}
+          {shortcut && !renaming && <div className="shortcut">{shortcut}</div>}
+        </div>
+        <div className="cwd" title={cwd}>
+          {displayPath(cwd, hidePathPrefix, home)}
+        </div>
+        <div className="bottom">
+          {status && <StatusDot status={status} />}
+          <div className="detail">
+            {message ?? (status ? STATUS_LABELS[status] : plural(workspace.tabs.length, "tab"))}
+          </div>
         </div>
       </div>
     </StyledWorkspaceRow>
   );
 }
 
+// The row and its spacing are one box, with the visuals on .box inside it:
+// the dragging copy is sized from the row's border box, so padding outside
+// it (or a margin) would make the copy grow and the list shift.
 const StyledWorkspaceRow = styled.div`
-  display: flex;
-  flex-flow: column;
-  gap: 3px;
-  padding: 8px 10px;
-  border-radius: 8px;
+  box-sizing: border-box;
+  padding: 1px 0;
   cursor: default;
   user-select: none;
 
-  &:hover {
-    background: ${colors.buttonBackgroundGlow()};
-  }
-
-  /* The copy that follows the pointer while dragging. */
-  &[data-dragging="true"] {
-    background: ${colors.textBackgroundPanel()};
-    box-shadow: 0 6px 20px rgb(0 0 0 / 0.25);
-  }
-
-  &[data-selected="true"] {
-    background: ${colors.linkActiveBackground()};
-  }
-
-  > .top {
+  > .box {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    flex-flow: column;
+    gap: 3px;
+    padding: 8px 10px;
+    border-radius: 8px;
 
-    > .title {
-      flex-grow: 1;
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      color: ${colors.text()};
-      font: ${fonts.displayMedium({ size: 13 })};
+    &:hover {
+      background: ${colors.buttonBackgroundGlow()};
     }
 
-    > input {
-      flex-grow: 1;
-      min-width: 0;
-      padding: 0 4px;
-      margin: -1px -5px;
-      border: 1px solid ${colors.primary()};
-      border-radius: 4px;
-      outline: none;
-      background: ${colors.textBackground()};
-      color: ${colors.text()};
-      font: ${fonts.displayMedium({ size: 13 })};
+    > .top {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+
+      > .title {
+        flex-grow: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: ${colors.text()};
+        font: ${fonts.displayMedium({ size: 13 })};
+      }
+
+      > input {
+        flex-grow: 1;
+        min-width: 0;
+        padding: 0 4px;
+        margin: -1px -5px;
+        border: 1px solid ${colors.primary()};
+        border-radius: 4px;
+        outline: none;
+        background: ${colors.textBackground()};
+        color: ${colors.text()};
+        font: ${fonts.displayMedium({ size: 13 })};
+      }
+
+      > .shortcut {
+        flex-shrink: 0;
+        color: ${colors.textSecondary()};
+        font: ${fonts.display({ size: 11 })};
+        opacity: 0.7;
+      }
     }
 
-    > .shortcut {
-      flex-shrink: 0;
-      color: ${colors.textSecondary()};
-      font: ${fonts.display({ size: 11 })};
-      opacity: 0.7;
-    }
-  }
-
-  > .cwd {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: ${colors.textSecondary()};
-    font: ${fonts.display({ size: 12 })};
-  }
-
-  > .bottom {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 16px;
-
-    > .detail {
-      min-width: 0;
+    > .cwd {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
       color: ${colors.textSecondary()};
       font: ${fonts.display({ size: 12 })};
     }
+
+    > .bottom {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 16px;
+
+      > .detail {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: ${colors.textSecondary()};
+        font: ${fonts.display({ size: 12 })};
+      }
+    }
   }
 
-  &[data-status="waiting"] > .bottom > .detail {
+  &[data-selected="true"] > .box {
+    background: ${colors.linkActiveBackground()};
+  }
+
+  &[data-status="waiting"] > .box > .bottom > .detail {
     color: ${colors.orange()};
+  }
+
+  /* The copy that follows the pointer while dragging. */
+  &[data-dragging="true"] > .box {
+    background: ${colors.textBackgroundPanel()};
+    box-shadow: 0 6px 20px rgb(0 0 0 / 0.25);
   }
 `;
 

@@ -3,15 +3,26 @@ import { LabeledTextInput } from "crosswing/components/forms/LabeledTextInput";
 import { LabeledToggle } from "crosswing/components/forms/LabeledToggle";
 import { useInputValue } from "crosswing/components/forms/useInputValue";
 import { fonts } from "crosswing/fonts";
+import { DialogView } from "crosswing/modals/dialog";
 import { styled } from "styled-components";
+import { useEffect } from "react";
 import { updateSettings, useSettings } from "./settings";
+import { focusActiveTerminal } from "./TerminalView";
 
 /**
- * The Settings window (⌘,). Changes apply as you make them, like the rest of
- * macOS; there's nothing to save.
+ * Settings (⌘,). Changes apply as you make them, like the rest of macOS;
+ * there's nothing to save.
  */
-export function Preferences() {
+export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const settings = useSettings();
+
+  // The terminal keeps the keyboard unless we take it: typing would land in
+  // the shell behind the dialog, and Escape wouldn't close it. However it
+  // closes (Escape, a click outside, the button), the keyboard goes back.
+  useEffect(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    return () => focusActiveTerminal();
+  }, []);
 
   const pathPrefix = useInputValue({
     initialValue: settings.hidePathPrefix || null,
@@ -19,8 +30,8 @@ export function Preferences() {
   });
 
   return (
-    <StyledPreferences>
-      <div className="fields">
+    <DialogView title="Settings" onClose={onClose} form={false}>
+      <StyledSettings>
         <LabeledTextInput label="Hide path prefix" placeholder="~/Code/" {...pathPrefix.props} />
         <div className="hint">Left off directories in the sidebar, so ~/Code/sage shows as sage.</div>
         <LabeledToggle
@@ -29,32 +40,23 @@ export function Preferences() {
           on={settings.notifications}
           onClick={() => updateSettings({ notifications: !settings.notifications })}
         />
-      </div>
-    </StyledPreferences>
+      </StyledSettings>
+    </DialogView>
   );
 }
 
-export const StyledPreferences = styled.div`
-  position: fixed;
-  inset: 0;
+const StyledSettings = styled.div`
   display: flex;
   flex-flow: column;
-  background: ${colors.textBackground()};
-  color: ${colors.text()};
-  user-select: none;
+  gap: 10px;
+  width: 440px;
+  max-width: 100%;
 
-  > .fields {
-    display: flex;
-    flex-flow: column;
-    gap: 10px;
-    padding: 16px 20px 20px;
-
-    > .hint {
-      /* Lined up with the field's label. */
-      margin-top: -4px;
-      padding: 0 10px;
-      color: ${colors.textSecondary()};
-      font: ${fonts.display({ size: 12 })};
-    }
+  > .hint {
+    /* Lined up with the field's label. */
+    margin-top: -4px;
+    padding: 0 10px;
+    color: ${colors.textSecondary()};
+    font: ${fonts.display({ size: 12 })};
   }
 `;

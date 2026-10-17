@@ -1,6 +1,7 @@
 import { execFile } from "child_process";
 import { randomUUID } from "crypto";
 import { EventEmitter } from "events";
+import fs from "fs";
 import os from "os";
 import type { AgentState, DaemonState, Tab } from "../shared/protocol.ts";
 import { Pane } from "./Pane.ts";
@@ -36,7 +37,7 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
   private readonly panes = new Map<string, Pane>();
   private readonly agents = new Map<string, AgentState>();
   /** The Claude Code session in each tab, from its hooks, for resuming it. */
-  private readonly claudeSessions = new Map<string, string>();
+  private readonly claudeSessions = new Map<string, { id: string; transcriptPath?: string }>();
   /** Each tab's shell's directory, as of the last `pollCwds`. */
   private readonly cwds = new Map<string, string>();
   private dark = true;
@@ -213,7 +214,10 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     const event: string | undefined = payload?.hook_event_name;
     // Session IDs are UUIDs; anything else isn't one we'd put in a command.
     const sessionId = payload?.session_id;
-    if (typeof sessionId === "string" && /^[\w-]+$/.test(sessionId)) this.claudeSessions.set(tabId, sessionId);
+    if (typeof sessionId === "string" && /^[\w-]+$/.test(sessionId)) {
+      const transcriptPath = typeof payload?.transcript_path === "string" ? payload.transcript_path : undefined;
+      this.claudeSessions.set(tabId, { id: sessionId, transcriptPath });
+    }
 
     const set = (status: AgentState["status"], message?: string) =>
       this.agents.set(tabId, { kind: "claude", status, message, since: Date.now() });
@@ -281,7 +285,7 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
         tabs: await Promise.all(
           workspace.tabIds.map(async (tabId) => ({
             cwd: (await this.panes.get(tabId)?.cwd()) ?? workspace.cwd,
-            claudeSessionId: this.claudeSessions.get(tabId),
+            claudeSessionId: this.resumableSession(tabId),
           })),
         ),
       })),
@@ -320,6 +324,18 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
 
     this.activeWorkspaceId = this.workspaces[saved.activeWorkspace]?.id ?? this.workspaces[0]?.id ?? null;
     this.emit("change");
+  }
+
+  /**
+   * The tab's Claude session, if there's anything to resume. Claude Code only
+   * writes a transcript once the session has a message (and never for a child
+   * session); resuming one without fails with "No conversation found".
+   */
+  private resumableSession(tabId: string): string | undefined {
+    const session = this.claudeSessions.get(tabId);
+    if (!session) return;
+    if (session.transcriptPath && !fs.existsSync(session.transcriptPath)) return;
+    return session.id;
   }
 
   /**

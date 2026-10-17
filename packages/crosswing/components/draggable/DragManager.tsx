@@ -1,8 +1,7 @@
-// @chatwing
-import { Coordinate } from "crosswing/components/touchUtils";
-import { Seconds } from "crosswing/shared/timespan";
+import { Coordinate } from "../touchUtils.js";
+import { Seconds } from "../../shared/timespan.js";
 import { RefObject } from "react";
-import { getBoundingClientRectWithMargins } from "./draggableUtils";
+import { getBoundingClientRectWithMargins } from "./draggableUtils.js";
 
 export type LockAxis = "x" | "y";
 
@@ -421,8 +420,8 @@ export class DragManager {
 
   private previousDraggingStyle = { visibility: "", marginBottom: "", marginRight: "" };
 
-  // Miks: collapses along the locked axis, so a horizontal row (a tab bar)
-  // closes up too; upstream only collapses height.
+  // Collapses along the locked axis, so a horizontal row (a tab bar) closes
+  // up too, not just a vertical list.
   private hideDraggingElement() {
     const { dragging } = this;
     this.previousDraggingStyle = {

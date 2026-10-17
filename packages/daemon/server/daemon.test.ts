@@ -246,6 +246,41 @@ test("a restarted daemon brings back the layout, each tab's directory, and its C
   );
 });
 
+test("a session with no transcript isn't resumed", async () => {
+  await daemon.close();
+  const statePath = path.join(home, "state.json");
+  const socketPath = path.join(home, "miks.sock");
+  const transcript = path.join(home, "transcript.jsonl");
+
+  const first = await serve({ socketPath, statePath, command: COMMAND });
+  first.workspaces.createWorkspace({ cwd: home });
+  const [blank, used] = [activeTab(first.workspaces.getState()), first.workspaces.createTab(first.workspaces.getState().workspaces[0].id)!];
+  // A fresh session with no message yet has a transcript path but no file.
+  await postHook(blank, { hook_event_name: "SessionStart", session_id: "blank", transcript_path: path.join(home, "none.jsonl") });
+  fs.writeFileSync(transcript, "{}\n");
+  await postHook(used, { hook_event_name: "SessionStart", session_id: "used", transcript_path: transcript });
+  await first.close();
+
+  const saved = JSON.parse(fs.readFileSync(statePath, "utf8"));
+  expect(saved.workspaces[0].tabs.map((tab: any) => tab.claudeSessionId)).toEqual([undefined, "used"]);
+  daemon = await serve({ socketPath, statePath, command: COMMAND });
+});
+
+test("panes don't inherit Claude Code's own variables", async () => {
+  process.env.CLAUDE_CODE_CHILD_SESSION = "1";
+  process.env.CLAUDECODE = "1";
+  try {
+    daemon.workspaces.createWorkspace({ cwd: home });
+  } finally {
+    delete process.env.CLAUDE_CODE_CHILD_SESSION;
+    delete process.env.CLAUDECODE;
+  }
+  const tabId = activeTab(daemon.workspaces.getState());
+
+  daemon.workspaces.getPane(tabId)!.write('echo "child=[$CLAUDE_CODE_CHILD_SESSION] code=[$CLAUDECODE]"\n');
+  await waitFor(() => paneText(tabId).then((text) => text.includes("child=[] code=[]")));
+});
+
 test("a session that ended isn't resumed", async () => {
   await daemon.close();
   const statePath = path.join(home, "state.json");
