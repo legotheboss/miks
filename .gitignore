@@ -126,4 +126,8 @@ USER.md
 
 .env.release.local
 
+## Brushy documents (README screenshots) kept beside the code.
+
+*.brushy
+
 # @chatwing:projectIgnores:end
