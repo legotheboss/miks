@@ -63,6 +63,8 @@ export class Pane extends EventEmitter<{
   private titleSetBy: string | null = null;
   /** The program in front, as of the last `pollForeground`. */
   private foreground: string;
+  /** What the pane started with: its shell, which isn't worth warning about. */
+  private readonly shell: string;
   /** Whether the program asked to hear about color scheme changes (DEC mode 2031). */
   private reportsColorScheme = false;
   /**
@@ -106,6 +108,7 @@ export class Pane extends EventEmitter<{
     const [file, ...args] = command;
     this.title = path.basename(file);
     this.foreground = this.title;
+    this.shell = this.title;
 
     this.terminal = new Terminal({
       cols,
@@ -234,6 +237,13 @@ export class Pane extends EventEmitter<{
     if (!foreground || foreground === this.foreground) return false;
     this.foreground = foreground;
     return true;
+  }
+
+  /** The program in front, unless it's the shell: what quitting would stop. */
+  running(): string | null {
+    // Right after spawning, the process is still named by its full path.
+    const foreground = path.basename(this.pty.process || this.foreground);
+    return foreground === this.shell ? null : foreground;
   }
 
   get pid(): number {

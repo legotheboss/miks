@@ -3,6 +3,8 @@
 import { DEFAULT_SETTINGS, type Settings } from "miks/shared/settings";
 import { useSyncExternalStore } from "react";
 
+export { displayPath } from "miks/shared/settings";
+
 const bridge = window.miks;
 const listeners = new Set<() => void>();
 let current: Settings = bridge?.getSettings() ?? DEFAULT_SETTINGS;
@@ -35,17 +37,4 @@ const MAX_FONT_SIZE = 32;
 
 export function setFontSize(size: number) {
   updateSettings({ fontSize: Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, size)) });
-}
-
-/**
- * A directory for display: the home folder as `~`, and the "hide path
- * prefix" setting left off (`~/Code/sage` with `~/Code/` hidden is `sage`).
- */
-export function displayPath(cwd: string, hidePrefix: string, home: string | null): string {
-  const tilde = (p: string) => (home && (p === home || p.startsWith(home + "/")) ? "~" + p.slice(home.length) : p);
-  const shown = tilde(cwd);
-
-  const prefix = tilde(hidePrefix.trim()).replace(/\/+$/, "");
-  if (!prefix) return shown;
-  return shown.startsWith(prefix + "/") ? shown.slice(prefix.length + 1) : shown;
 }

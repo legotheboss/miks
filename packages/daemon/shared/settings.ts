@@ -10,6 +10,8 @@ export type Settings = {
   notifications: boolean;
   /** Whether the sidebar is showing (⌘B). */
   sidebarVisible: boolean;
+  /** Whether the daemon, and every terminal, outlives quitting the app. */
+  keepDaemonRunning: boolean;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -17,4 +19,18 @@ export const DEFAULT_SETTINGS: Settings = {
   hidePathPrefix: "",
   notifications: true,
   sidebarVisible: true,
+  keepDaemonRunning: false,
 };
+
+/**
+ * A directory for display: the home folder as `~`, and the "hide path
+ * prefix" setting left off (`~/Code/sage` with `~/Code/` hidden is `sage`).
+ */
+export function displayPath(cwd: string, hidePrefix: string, home: string | null): string {
+  const tilde = (p: string) => (home && (p === home || p.startsWith(home + "/")) ? "~" + p.slice(home.length) : p);
+  const shown = tilde(cwd);
+
+  const prefix = tilde(hidePrefix.trim()).replace(/\/+$/, "");
+  if (!prefix) return shown;
+  return shown.startsWith(prefix + "/") ? shown.slice(prefix.length + 1) : shown;
+}

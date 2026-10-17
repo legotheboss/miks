@@ -47,6 +47,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           on={settings.notifications}
           onClick={() => updateSettings({ notifications: !settings.notifications })}
         />
+        <LabeledToggle
+          label="Keep terminals running"
+          detail="After Miks quits, so they're all still there when it opens again."
+          on={settings.keepDaemonRunning}
+          onClick={() => updateSettings({ keepDaemonRunning: !settings.keepDaemonRunning })}
+        />
       </StyledSettings>
     </DialogView>
   );

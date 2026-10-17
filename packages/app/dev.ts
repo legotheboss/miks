@@ -63,7 +63,8 @@ fs.watch(appDir, (_event, file) => {
       restarting = false;
       startElectron();
     });
-    electron.kill();
+    // SIGUSR2 quits leaving the daemon running; SIGTERM would stop it.
+    electron.kill("SIGUSR2");
   }, 200);
 });
 
@@ -71,7 +72,7 @@ fs.watch(appDir, (_event, file) => {
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
   process.on(signal, () => {
     restarting = true;
-    electron?.kill();
+    electron?.kill("SIGUSR2");
     server.close().finally(() => process.exit(0));
   });
 }

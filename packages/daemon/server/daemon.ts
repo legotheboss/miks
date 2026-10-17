@@ -58,11 +58,20 @@ export async function serve({
   const foregroundPoll = setInterval(() => workspaces.pollForeground(), 500);
   foregroundPoll.unref();
 
+  // Connected UIs.
+  const sockets = new Set<WebSocket>();
+
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://miks");
 
     if (req.method === "GET" && url.pathname === "/api/ping") {
-      return json(res, 200, { ok: true, pid: process.pid });
+      // How many UIs are connected, so one quitting can tell whether another
+      // (the dev build beside Miks.app, say) still needs the daemon.
+      return json(res, 200, { ok: true, pid: process.pid, clients: sockets.size });
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/running") {
+      return json(res, 200, { running: workspaces.running() });
     }
 
     if (req.method === "GET" && url.pathname === "/api/state") {
@@ -85,7 +94,6 @@ export async function serve({
   //
 
   const wss = new WebSocketServer({ server, path: "/ws" });
-  const sockets = new Set<WebSocket>();
 
   let broadcastPending = false;
   workspaces.on("change", () => {

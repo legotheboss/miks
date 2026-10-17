@@ -6,7 +6,7 @@ import http from "http";
 import path from "path";
 import { connectDaemon as openDaemonSocket } from "miks/shared/connect";
 import { logPath, miksHome, socketPath } from "miks/shared/paths";
-import { DEFAULT_SETTINGS, type Settings } from "miks/shared/settings";
+import { DEFAULT_SETTINGS, displayPath, type Settings } from "miks/shared/settings";
 import type { WebSocket } from "ws";
 
 // The Electron shell is deliberately thin: a window, a menu, and a pipe
@@ -195,17 +195,6 @@ function createWindow() {
   contents.on("destroyed", () => {
     links.get(contents)?.close();
     links.delete(contents);
-  });
-
-  // ⌘⇧↑/↓ (previous and next workspace) are also text editing commands
-  // (select to start and end), and the terminal's hidden text field takes
-  // them before the menu gets a look. So they're caught here, before the page.
-  contents.on("before-input-event", (event, input) => {
-    if (input.type !== "keyDown" || !input.meta || !input.shift || input.alt || input.control) return;
-    const command = { ArrowUp: "previousWorkspace", ArrowDown: "nextWorkspace" }[input.key];
-    if (!command) return;
-    event.preventDefault();
-    contents.send("miks:command", command);
   });
 
   // Nothing navigates the window away from the UI (a stray file drop would).
@@ -398,8 +387,9 @@ function buildMenu() {
       submenu: [
         command("nextTab", "CmdOrCtrl+Shift+]", "Next tab"),
         command("previousTab", "CmdOrCtrl+Shift+[", "Previous tab"),
-        command("nextWorkspace", "CmdOrCtrl+Shift+Down", "Next workspace"),
-        command("previousWorkspace", "CmdOrCtrl+Shift+Up", "Previous workspace"),
+        // As in cmux.
+        command("nextWorkspace", "Cmd+Ctrl+]", "Next workspace"),
+        command("previousWorkspace", "Cmd+Ctrl+[", "Previous workspace"),
         { type: "separator" },
         ...Array.from({ length: 9 }, (_, i) => command(`workspace${i + 1}`, `CmdOrCtrl+${i + 1}`, `Workspace ${i + 1}`)),
         { type: "separator" },
@@ -429,6 +419,80 @@ app.whenReady().then(() => {
   });
 });
 
-// Closing the window doesn't end any sessions, so there's no reason to
-// linger; quitting is as cheap as reloading.
+// Closing the last window quits, like a terminal app.
 app.on("window-all-closed", () => app.quit());
+
+//
+// Quitting. Like any terminal app, quitting ends the terminals (it stops the
+// daemon), asking first if programs are running in them. Except: with
+// "Keep terminals running" on; when another window still uses the daemon (the
+// dev build beside Miks.app); and when install-app relaunches us (SIGUSR2).
+// The daemon saves its layout as it stops, so the next launch brings it back
+// and resumes the Claude sessions in it.
+//
+
+let quitChecked = false;
+let relaunching = false;
+
+process.on("SIGUSR2", () => {
+  relaunching = true;
+  app.quit();
+});
+
+app.on("before-quit", (event) => {
+  if (quitChecked || relaunching || settings.keepDaemonRunning) return;
+  event.preventDefault();
+  stopDaemonForQuit().then((quit) => {
+    if (!quit) return;
+    quitChecked = true;
+    app.quit();
+  });
+});
+
+/** Stops the daemon, unless that means stopping programs you'd rather keep. */
+async function stopDaemonForQuit(): Promise<boolean> {
+  const ping = await daemonGet("/api/ping");
+  if (!ping?.pid) return true;
+  if ((ping.clients ?? 0) > links.size) return true;
+
+  const running = await runningPrograms();
+  if (running.length > 0) {
+    const shown = running.slice(0, 8);
+    const more = running.length - shown.length;
+    const options = {
+      type: "warning" as const,
+      message: "Quit Miks?",
+      detail:
+        `Quitting stops what's running in its terminals:\n\n${shown.join("\n")}` +
+        (more ? `\nand ${more} more` : "") +
+        `\n\nTo keep terminals running after Miks quits, turn on "Keep terminals running" in Settings.`,
+      buttons: ["Quit", "Cancel"],
+      defaultId: 0,
+      cancelId: 1,
+    };
+    const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+    const { response } = window ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options);
+    if (response !== 0) return false;
+  }
+
+  // Let go of it first, so no window reconnects (and restarts it) as it goes.
+  for (const socket of links.values()) socket.close();
+  links.clear();
+  process.kill(ping.pid, "SIGTERM");
+  return true;
+}
+
+/** "claude in sage", one per program in front of a shell. */
+async function runningPrograms(): Promise<string[]> {
+  const result = await daemonGet("/api/running");
+  if (Array.isArray(result?.running)) {
+    return result.running.map(({ program, cwd }: { program: string; cwd: string | null }) =>
+      cwd ? `${program} in ${displayPath(cwd, settings.hidePathPrefix, app.getPath("home"))}` : program,
+    );
+  }
+
+  // A daemon from before /api/running: all we can say is how many terminals.
+  const state = await daemonGet("/api/state");
+  const tabs = (state?.workspaces ?? []).reduce((count: number, w: any) => count + w.tabs.length, 0);
+  return tabs ? [`${tabs} terminal${tabs === 1 ? "" : "s"}`] : [];
+}

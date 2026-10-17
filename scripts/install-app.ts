@@ -185,8 +185,9 @@ const running = uiPids();
 const wasRunning = running.length > 0;
 if (wasRunning) {
   console.log("Quitting Miks…");
-  // Electron quits cleanly on SIGTERM.
-  for (const pid of running) process.kill(pid, "SIGTERM");
+  // SIGUSR2 is our "quit, leaving the daemon running" (packages/app/main.ts);
+  // SIGTERM is an ordinary quit, which would stop it.
+  for (const pid of running) process.kill(pid, "SIGUSR2");
   for (let i = 0; i < 50 && running.some(alive); i++) await new Promise((resolve) => setTimeout(resolve, 100));
   if (running.some(alive)) throw new Error("Miks didn't quit; quit it and run this again.");
 }

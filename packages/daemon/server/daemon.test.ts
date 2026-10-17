@@ -349,6 +349,15 @@ test("each tab reports the directory its shell is in", async () => {
   });
 });
 
+test("a program in front of the shell is reported as running", async () => {
+  daemon.workspaces.createWorkspace({ cwd: home });
+  const tabId = activeTab(daemon.workspaces.getState());
+  expect(daemon.workspaces.running()).toEqual([]);
+
+  daemon.workspaces.getPane(tabId)!.write("sleep 30\n");
+  await waitFor(() => daemon.workspaces.running()[0]?.program === "sleep");
+});
+
 test("programs that set mode 2031 hear when the appearance changes", async () => {
   daemon.workspaces.createWorkspace({ cwd: home });
   const tabId = activeTab(daemon.workspaces.getState());

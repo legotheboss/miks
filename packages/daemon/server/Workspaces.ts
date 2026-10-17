@@ -76,6 +76,16 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     };
   }
 
+  /** Programs running in front of a shell, with where: what quitting would stop. */
+  running(): { program: string; cwd: string | null }[] {
+    return this.workspaces.flatMap((workspace) =>
+      workspace.tabIds.flatMap((id) => {
+        const program = this.panes.get(id)?.running();
+        return program ? [{ program, cwd: this.cwds.get(id) ?? null }] : [];
+      }),
+    );
+  }
+
   getPane(tabId: string): Pane | undefined {
     return this.panes.get(tabId);
   }

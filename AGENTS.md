@@ -20,9 +20,14 @@ it exists because cmux grew far past that.
 - `packages/crosswing`: wings-synced shared UI code (`.wings`); check
   `wings sync miks --dry-run` before committing, drift should be 0.
 
-The point of the split: **quitting or reloading the UI never touches a
-session**. Only restarting the daemon does, and that kills every terminal; say
-so before doing it to the real one.
+The point of the split: **reloading or relaunching the UI never touches a
+session**. Stopping the daemon does, and that kills every terminal; say so
+before doing it to the real one. Quitting Miks (⌘Q, or the last window
+closing) does stop it, like any terminal app, after asking if programs are
+running in front of a shell, unless "Keep terminals running" is on or another
+UI is still connected (`clients` in `/api/ping`). SIGUSR2 is the quit that
+always leaves it running: `install:app` and `yarn dev`'s restarts send that.
+Never SIGTERM a Miks UI; that's an ordinary quit.
 
 # Running
 
@@ -41,8 +46,8 @@ so before doing it to the real one.
   /Applications/Miks.app in place, relaunching it if it was running. In place,
   because the daemon outlives installs and macOS names it after wherever its
   bundle is: a bundle moved to the Trash turned permission prompts into
-  "Miks 11-23-24-642". It quits only the UI, found by pid, excluding the
-  daemon: never `pkill -x Miks`. The running daemon keeps its old code until
+  "Miks 11-23-24-642". It quits only the UI (SIGUSR2), found by pid,
+  excluding the daemon: never `pkill -x Miks`. The running daemon keeps its old code until
   it next starts.
 - Real state lives in `~/Library/Application Support/Miks` (socket,
   `daemon.log`, `state.json`, and Electron's profile in `UI/`). The daemon
