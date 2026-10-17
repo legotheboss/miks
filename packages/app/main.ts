@@ -7,7 +7,10 @@ import path from "path";
 import { connectDaemon as openDaemonSocket } from "miks/shared/connect";
 import { logPath, miksHome, socketPath } from "miks/shared/paths";
 import { DEFAULT_SETTINGS, displayPath, type Settings } from "miks/shared/settings";
+import os from "os";
 import type { WebSocket } from "ws";
+import { syncClaudeHooks } from "./claudeHooks.ts";
+import { checkForUpdates, startUpdates } from "./updates.ts";
 
 // The Electron shell is deliberately thin: a window, a menu, and a pipe
 // between the renderer and the daemon's Unix socket (which the renderer
@@ -121,6 +124,7 @@ async function linkWindow(contents: WebContents) {
   });
 
   contents.send("miks:status", { connected: true });
+  openPendingFolders();
 }
 
 ipcMain.on("miks:send", (event, message: string) => {
@@ -219,6 +223,7 @@ function createWindow() {
   window.on("closed", () => {
     if (mainWindow === window) mainWindow = null;
   });
+  return window;
 }
 
 //
@@ -316,7 +321,73 @@ ipcMain.on("miks:setSettings", (_event, changes: Partial<Settings>) => {
   fs.mkdirSync(path.dirname(settingsPath), { recursive: true, mode: 0o700 });
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
   for (const window of BrowserWindow.getAllWindows()) window.webContents.send("miks:settings", settings);
+  if ("claudeHooks" in changes) updateClaudeHooks();
 });
+
+function updateClaudeHooks() {
+  // A scratch Miks (MIKS_HOME) mustn't rewire the real Claude Code's hooks.
+  if (process.env.MIKS_HOME) return;
+  try {
+    syncClaudeHooks({
+      enabled: settings.claudeHooks,
+      bundledScript: path.join(root, "packages/daemon/hooks/claude-hook.sh"),
+      installedScript: path.join(miksHome(), "claude-hook.sh"),
+      claudeSettingsPath: path.join(os.homedir(), ".claude/settings.json"),
+    });
+  } catch (error) {
+    console.error("Couldn't update Claude Code's hooks:", error);
+  }
+}
+
+//
+// Opening a folder in Miks (`open -a Miks <folder>`, which is what GitHub
+// Desktop's custom shell does, or a folder dropped on the Dock icon) selects
+// the workspace already there, or makes one.
+//
+
+const pendingFolders: string[] = [];
+
+app.on("open-file", (event, file) => {
+  event.preventDefault();
+  openFolder(file);
+});
+
+// Or given as arguments, launching Miks.app's binary directly.
+if (app.isPackaged) for (const arg of process.argv.slice(1)) if (!arg.startsWith("-")) openFolder(arg);
+
+function openFolder(file: string) {
+  let folder: string;
+  try {
+    folder = fs.statSync(file).isDirectory() ? file : path.dirname(file);
+  } catch {
+    return;
+  }
+  pendingFolders.push(path.resolve(folder));
+  if (app.isReady()) openPendingFolders();
+}
+
+async function openPendingFolders() {
+  if (pendingFolders.length === 0) return;
+  const window = mainWindow ?? (app.isReady() ? createWindow() : null);
+  // Once connected; linkWindow calls back.
+  const link = window && links.get(window.webContents);
+  if (!window || !link) return;
+
+  const folders = pendingFolders.splice(0);
+  const state = await daemonGet("/api/state");
+  for (const folder of folders) {
+    const existing = (state?.workspaces ?? []).find(
+      (w: any) => w.cwd === folder || w.tabs.some((tab: any) => tab.cwd === folder),
+    );
+    link.send(
+      JSON.stringify(existing ? { type: "select", workspaceId: existing.id } : { type: "createWorkspace", cwd: folder }),
+    );
+  }
+
+  if (window.isMinimized()) window.restore();
+  window.show();
+  app.focus({ steal: true });
+}
 
 
 //
@@ -338,6 +409,8 @@ function buildMenu() {
       role: "appMenu",
       submenu: [
         { role: "about" },
+        { type: "separator" },
+        { label: "Check for updates…", click: () => checkForUpdates() },
         { type: "separator" },
         command("settings", "CmdOrCtrl+,", "Settings…"),
         { type: "separator" },
@@ -413,6 +486,8 @@ app.whenReady().then(() => {
   if (!app.isPackaged) app.dock?.setIcon(iconPath);
   buildMenu();
   createWindow();
+  updateClaudeHooks();
+  startUpdates(confirmQuitForUpdate);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -448,6 +523,13 @@ app.on("before-quit", (event) => {
     app.quit();
   });
 });
+
+/** Restarting to install an update is a quit like any other. */
+async function confirmQuitForUpdate(): Promise<boolean> {
+  if (!relaunching && !settings.keepDaemonRunning && !(await stopDaemonForQuit())) return false;
+  quitChecked = true;
+  return true;
+}
 
 /** Stops the daemon, unless that means stopping programs you'd rather keep. */
 async function stopDaemonForQuit(): Promise<boolean> {

@@ -122,4 +122,8 @@ USER.md
 
 .miks/
 
+## Release credentials (NOTARY_PROFILE and friends) for `yarn release`.
+
+.env.release.local
+
 # @chatwing:projectIgnores:end

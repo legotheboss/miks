@@ -12,6 +12,8 @@ export type Settings = {
   sidebarVisible: boolean;
   /** Whether the daemon, and every terminal, outlives quitting the app. */
   keepDaemonRunning: boolean;
+  /** Whether Miks keeps its hooks in Claude Code's settings, for agent status. */
+  claudeHooks: boolean;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -20,6 +22,7 @@ export const DEFAULT_SETTINGS: Settings = {
   notifications: true,
   sidebarVisible: true,
   keepDaemonRunning: false,
+  claudeHooks: true,
 };
 
 /**

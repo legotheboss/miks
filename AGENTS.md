@@ -55,6 +55,19 @@ Never SIGTERM a Miks UI; that's an ordinary quit.
   session ID from the hooks) and restores it on start, resuming those
   sessions with `claude --resume`. The dev build and Miks.app
   share it, and so share one daemon.
+- `yarn release <version>` (`scripts/release.ts`) notarizes and publishes a
+  GitHub release with `Miks-macos.zip` and `update.json`, the feed
+  `packages/app/updates.ts` reads (Electron's autoUpdater, Squirrel.Mac, in
+  `serverType: "json"` mode) from `releases/latest/download/`. Squirrel
+  installs a downloaded update on any quit, and swaps the bundle, so a daemon
+  kept running ("Keep terminals running") is left on the old one.
+  `MIKS_UPDATE_FEED` points a packaged copy at a test feed; verified that way
+  against a local `python3 -m http.server`.
+- Miks keeps its Claude Code hooks in `~/.claude/settings.json` itself
+  (`packages/app/claudeHooks.ts`, on launch and when the setting changes),
+  running a copy of the script in Miks's home so the path is the same for
+  every build. Not with `MIKS_HOME` set: a scratch Miks mustn't rewire the
+  real Claude Code.
 - The icon: `packages/app/icon/make-icon.sh` turns `source.png` (full-bleed
   square) into `icon.png` (dev Dock icon) and `Miks.icns`.
 - `node scripts/devtools.ts screenshot out.png` / `eval '<js>'` drive the

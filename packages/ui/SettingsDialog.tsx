@@ -48,6 +48,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           onClick={() => updateSettings({ notifications: !settings.notifications })}
         />
         <LabeledToggle
+          label="Claude Code status"
+          detail="Adds hooks to ~/.claude/settings.json that tell Miks what Claude is up to. Outside Miks they do nothing."
+          on={settings.claudeHooks}
+          onClick={() => updateSettings({ claudeHooks: !settings.claudeHooks })}
+        />
+        <LabeledToggle
           label="Keep terminals running"
           detail="After Miks quits, so they're all still there when it opens again."
           on={settings.keepDaemonRunning}
