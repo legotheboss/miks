@@ -1,0 +1,60 @@
+{
+  "canvasHeight" : 2166,
+  "canvasWidth" : 2950,
+  "colorSpace" : "displayP3",
+  "layers" : [
+    {
+      "id" : "701EF8EE-01CB-4A8D-8021-AE4178B6E075",
+      "isPaintable" : false,
+      "isVisible" : true,
+      "name" : "Screenshot 2026-10-17 at 12.31.09 PM",
+      "opacity" : 1,
+      "sourceID" : "46B6A0E6-7C6A-4B39-941E-6C84FA8E57FC",
+      "transform" : [
+        1,
+        0,
+        0,
+        1,
+        0,
+        96
+      ]
+    },
+    {
+      "effects" : {
+        "dropShadow" : {
+          "angle" : 120,
+          "blendMode" : "multiply",
+          "color" : {
+            "blue" : 0,
+            "green" : 0,
+            "red" : 0
+          },
+          "distance" : 20,
+          "isEnabled" : true,
+          "knocksOut" : true,
+          "opacity" : 0.7294323979591837,
+          "size" : 63,
+          "spread" : 0,
+          "usesGlobalLight" : true
+        },
+        "globalLightAngle" : 134.49711412270776,
+        "isEnabled" : true
+      },
+      "id" : "9BFC21B2-0021-4D4A-A43A-B07C9075D493",
+      "isPaintable" : false,
+      "isVisible" : true,
+      "name" : "icon",
+      "opacity" : 1,
+      "sourceID" : "3F92945D-2A03-4E6C-A023-9379BC16D830",
+      "transform" : [
+        1,
+        0,
+        0,
+        1,
+        1939,
+        -8
+      ]
+    }
+  ],
+  "version" : 1
+}
