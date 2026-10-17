@@ -58,7 +58,11 @@ export class Pane extends EventEmitter<{
   exit: [number];
 }> {
   readonly id: string;
+  /** The last title a program set (OSC 0/2), and which program it was. */
   title: string;
+  private titleSetBy: string | null = null;
+  /** The program in front, as of the last `pollForeground`. */
+  private foreground: string;
   /** Whether the program asked to hear about color scheme changes (DEC mode 2031). */
   private reportsColorScheme = false;
   private dark = true;
@@ -95,6 +99,7 @@ export class Pane extends EventEmitter<{
 
     const [file, ...args] = command;
     this.title = path.basename(file);
+    this.foreground = this.title;
 
     this.terminal = new Terminal({
       cols,
@@ -128,6 +133,8 @@ export class Pane extends EventEmitter<{
     this.terminal.onTitleChange((title) => {
       const previous = this.title;
       this.title = title;
+      this.titleSetBy = this.pty.process;
+      this.foreground = this.titleSetBy;
       this.emit("title", title, previous);
     });
 
@@ -195,6 +202,25 @@ export class Pane extends EventEmitter<{
 
   kill() {
     this.pty.kill("SIGHUP");
+  }
+
+  /**
+   * What the tab should be called. A program's own title while that program
+   * is still in front (Claude Code's session topic, say); otherwise the name
+   * of whatever is, the way Terminal.app does it. Plain zsh and most programs
+   * (top, vim) never set a title, and one left by a program that has since
+   * exited is stale.
+   */
+  get displayTitle(): string {
+    return this.titleSetBy && this.titleSetBy === this.foreground ? this.title : this.foreground;
+  }
+
+  /** Checks which program is in front. Returns whether that changed. */
+  pollForeground(): boolean {
+    const foreground = this.pty.process;
+    if (!foreground || foreground === this.foreground) return false;
+    this.foreground = foreground;
+    return true;
   }
 
   get pid(): number {

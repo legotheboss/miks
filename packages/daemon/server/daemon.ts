@@ -53,6 +53,10 @@ export async function serve({
 
   const cwdPoll = setInterval(() => workspaces.pollCwds(), 2000);
   cwdPoll.unref();
+  // Cheap (one ioctl per pane), so often enough that a tab says `top` about
+  // when top appears.
+  const foregroundPoll = setInterval(() => workspaces.pollForeground(), 500);
+  foregroundPoll.unref();
 
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://miks");
@@ -187,6 +191,7 @@ export async function serve({
       // Saved before the panes go: each one exiting removes its tab, and
       // that layout, emptied, is not the one to come back to.
       clearInterval(cwdPoll);
+      clearInterval(foregroundPoll);
       await persistence?.final();
       workspaces.killAll();
       for (const socket of sockets) socket.terminate();

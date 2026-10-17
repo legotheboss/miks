@@ -343,6 +343,28 @@ test("programs that set mode 2031 hear when the appearance changes", async () =>
   await waitFor(() => paneText(tabId).then((text) => new RegExp(`${report(1)}[\\s\\S]*${report(2)}`).test(text)));
 });
 
+test("a tab is called by the program in front, unless that program titled it", async () => {
+  daemon.workspaces.createWorkspace({ cwd: home });
+  const tabId = activeTab(daemon.workspaces.getState());
+  const pane = daemon.workspaces.getPane(tabId)!;
+  const title = () => {
+    daemon.workspaces.pollForeground();
+    return daemon.workspaces.getState().workspaces[0].tabs[0].title;
+  };
+
+  // Like top: sets no title of its own.
+  pane.write("sleep 2\n");
+  await waitFor(() => title() === "sleep");
+  await waitFor(() => title() === "bash", 4000);
+
+  // A title the shell itself sets stands while the shell is in front...
+  pane.write("printf '\\033]0;my title\\007'\n");
+  await waitFor(() => title() === "my title");
+  // ...but not over a program that came after it.
+  pane.write("sleep 2\n");
+  await waitFor(() => title() === "sleep");
+});
+
 test("the hook script posts to the daemon from inside a pane", async () => {
   daemon.workspaces.createWorkspace({ cwd: home });
   const tabId = activeTab(daemon.workspaces.getState());

@@ -1,5 +1,5 @@
 import { spawn } from "child_process";
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, screen, shell } from "electron";
 import type { MenuItemConstructorOptions, WebContents } from "electron";
 import fs from "fs";
 import http from "http";
@@ -174,9 +174,11 @@ async function restartDaemon(window: BrowserWindow | undefined) {
 //
 
 function createWindow() {
+  const saved = loadWindowState();
   const window = new BrowserWindow({
     width: 1280,
     height: 800,
+    ...saved?.bounds,
     minWidth: 500,
     minHeight: 300,
     titleBarStyle: "hiddenInset",
@@ -210,9 +212,61 @@ function createWindow() {
   if (devUrl) window.loadURL(devUrl);
   else window.loadFile(path.join(root, "packages/ui/dist/index.html"));
 
+  if (saved?.maximized) window.maximize();
+  rememberWindowState(window);
+
   mainWindow = window;
   window.on("closed", () => {
     if (mainWindow === window) mainWindow = null;
+  });
+}
+
+//
+// Where the window was, in the UI's profile folder, so it reopens there.
+//
+
+type WindowState = { bounds: Electron.Rectangle; maximized: boolean };
+
+const windowStatePath = () => path.join(app.getPath("userData"), "window.json");
+
+function loadWindowState(): WindowState | null {
+  try {
+    const state: WindowState = JSON.parse(fs.readFileSync(windowStatePath(), "utf8"));
+    // Somewhere you can still see: not on a display that's since gone away.
+    const { bounds } = state;
+    const visible = screen.getAllDisplays().some(({ workArea: area }) =>
+      bounds.x < area.x + area.width &&
+      bounds.x + bounds.width > area.x &&
+      bounds.y < area.y + area.height &&
+      bounds.y + bounds.height > area.y,
+    );
+    return visible ? state : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberWindowState(window: BrowserWindow) {
+  let timer: NodeJS.Timeout | null = null;
+
+  const save = () => {
+    if (window.isDestroyed() || window.isFullScreen()) return;
+    // The size it returns to when un-maximized, not the maximized size.
+    const state: WindowState = { bounds: window.getNormalBounds(), maximized: window.isMaximized() };
+    fs.writeFileSync(windowStatePath(), JSON.stringify(state));
+  };
+  const saveSoon = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(save, 500);
+  };
+
+  window.on("resize", saveSoon);
+  window.on("move", saveSoon);
+  window.on("maximize", saveSoon);
+  window.on("unmaximize", saveSoon);
+  window.on("close", () => {
+    if (timer) clearTimeout(timer);
+    save();
   });
 }
 

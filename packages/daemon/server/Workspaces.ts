@@ -166,6 +166,13 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     for (const pane of this.panes.values()) pane.setDark(dark);
   }
 
+  /** Notices programs starting and exiting in front, for tab titles. */
+  pollForeground() {
+    let changed = false;
+    for (const pane of this.panes.values()) changed = pane.pollForeground() || changed;
+    if (changed) this.emit("change");
+  }
+
   /**
    * Refreshes every tab's directory with one `lsof` for all the shells, since
    * nothing tells us when a shell cd's. Emits `change` only if one moved.
@@ -356,7 +363,7 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
   private getTab(id: string): Tab {
     return {
       id,
-      title: this.panes.get(id)?.title ?? "",
+      title: this.panes.get(id)?.displayTitle ?? "",
       cwd: this.cwds.get(id) ?? null,
       agent: this.agents.get(id) ?? null,
     };
