@@ -6,6 +6,7 @@ import http from "http";
 import path from "path";
 import { connectDaemon as openDaemonSocket } from "miks/shared/connect";
 import { logPath, miksHome, socketPath } from "miks/shared/paths";
+import { DEFAULT_SETTINGS, type Settings } from "miks/shared/settings";
 import type { WebSocket } from "ws";
 
 // The Electron shell is deliberately thin: a window, a menu, and a pipe
@@ -205,9 +206,77 @@ function createWindow() {
     return { action: "deny" };
   });
 
+  loadUI(window);
+  mainWindow = window;
+  window.on("closed", () => {
+    if (mainWindow === window) mainWindow = null;
+  });
+}
+
+/** Loads the UI, at `#hash` for windows other than the main one. */
+function loadUI(window: BrowserWindow, hash?: string) {
   const devUrl = process.env.MIKS_UI_URL;
-  if (devUrl) window.loadURL(devUrl);
-  else window.loadFile(path.join(root, "packages/ui/dist/index.html"));
+  if (devUrl) window.loadURL(hash ? `${devUrl}#${hash}` : devUrl);
+  else window.loadFile(path.join(root, "packages/ui/dist/index.html"), { hash });
+}
+
+let mainWindow: BrowserWindow | null = null;
+
+// A notification was clicked: bring Miks forward.
+ipcMain.on("miks:focus", () => {
+  if (!mainWindow) return createWindow();
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  app.focus({ steal: true });
+});
+
+//
+// Settings, in settings.json, shared by every window.
+//
+
+const settingsPath = path.join(miksHome(), "settings.json");
+let settings: Settings = loadSettings();
+
+function loadSettings(): Settings {
+  try {
+    return { ...DEFAULT_SETTINGS, ...JSON.parse(fs.readFileSync(settingsPath, "utf8")) };
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+
+ipcMain.on("miks:getSettings", (event) => {
+  event.returnValue = settings;
+});
+
+ipcMain.on("miks:setSettings", (_event, changes: Partial<Settings>) => {
+  settings = { ...settings, ...changes };
+  fs.mkdirSync(path.dirname(settingsPath), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+  for (const window of BrowserWindow.getAllWindows()) window.webContents.send("miks:settings", settings);
+});
+
+let preferencesWindow: BrowserWindow | null = null;
+
+function openPreferences() {
+  if (preferencesWindow) return preferencesWindow.focus();
+
+  preferencesWindow = new BrowserWindow({
+    width: 520,
+    height: 300,
+    resizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    title: "Settings",
+    backgroundColor: "#1a1b1e",
+    webPreferences: {
+      preload: path.join(import.meta.dirname, "preload.cjs"),
+      contextIsolation: true,
+      sandbox: true,
+    },
+  });
+  loadUI(preferencesWindow, "preferences");
+  preferencesWindow.on("closed", () => (preferencesWindow = null));
 }
 
 //
@@ -229,6 +298,8 @@ function buildMenu() {
       role: "appMenu",
       submenu: [
         { role: "about" },
+        { type: "separator" },
+        { label: "Settings…", accelerator: "CmdOrCtrl+,", click: () => openPreferences() },
         { type: "separator" },
         {
           label: "Restart daemon…",

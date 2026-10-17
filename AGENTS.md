@@ -92,6 +92,24 @@ resizes); keep it passing.
   start as plain Node, and a Miks.app launched from a pane loads the dev
   server.
 
+# UI notes
+
+- Settings (`miks/shared/settings`) live in `settings.json`, owned by the
+  Electron main process and pushed to every window; not localStorage, which
+  is per origin, so the dev build and Miks.app would each have their own.
+  The Settings window (⌘,) is the same UI loaded at `#preferences`.
+- Drag to reorder uses chatwing's draggable (`packages/ui/draggable`, copied
+  from harbor with one marked change: collapsing along the x axis for the tab
+  bar). It needs a `data-draggable-root` ancestor and logs an error, rather
+  than failing loudly, without one. The dragged copy is placed outside its
+  list, so draggable items must be styled on their own, not from the parent.
+- Notifications come from the renderer (`useAgentNotifications` in
+  `App.tsx`): only for status changes seen while connected, and not for the
+  tab on screen in a focused window.
+- Claude Code sets DEC mode 2031 at startup and never queries the scheme, so
+  the daemon (`Pane.ts`) reports the current one as soon as the mode is set,
+  then on every change the UI reports (`appearance`). xterm.js has no 2031.
+
 # Agent status
 
 `packages/daemon/hooks/claude-hook.sh` is a Claude Code hook for every event;

@@ -1,3 +1,4 @@
+import { execFile } from "child_process";
 import { randomUUID } from "crypto";
 import { EventEmitter } from "events";
 import os from "os";
@@ -36,6 +37,9 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
   private readonly agents = new Map<string, AgentState>();
   /** The Claude Code session in each tab, from its hooks, for resuming it. */
   private readonly claudeSessions = new Map<string, string>();
+  /** Each tab's shell's directory, as of the last `pollCwds`. */
+  private readonly cwds = new Map<string, string>();
+  private dark = true;
 
   private readonly socketPath: string;
   private readonly command?: string[];
@@ -59,6 +63,7 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
 
   getState(): DaemonState {
     return {
+      home: os.homedir(),
       activeWorkspaceId: this.activeWorkspaceId,
       workspaces: this.workspaces.map((workspace) => ({
         id: workspace.id,
@@ -116,6 +121,7 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
       id,
       cwd: cwd ?? workspace.cwd,
       command: resumeClaudeSession ? this.resumeCommand(resumeClaudeSession) : this.command,
+      dark: this.dark,
       env: { MIKS_PANE_ID: id, MIKS_SOCKET: this.socketPath },
     });
     this.panes.set(id, pane);
@@ -134,6 +140,48 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
 
   closeTab(tabId: string) {
     this.panes.get(tabId)?.kill();
+  }
+
+  moveWorkspace(workspaceId: string, index: number) {
+    const from = this.workspaces.findIndex((w) => w.id === workspaceId);
+    if (from === -1) return;
+
+    const [workspace] = this.workspaces.splice(from, 1);
+    this.workspaces.splice(clamp(index, 0, this.workspaces.length), 0, workspace);
+    this.emit("change");
+  }
+
+  moveTab(tabId: string, index: number) {
+    const workspace = this.workspaces.find((w) => w.tabIds.includes(tabId));
+    if (!workspace) return;
+
+    workspace.tabIds.splice(workspace.tabIds.indexOf(tabId), 1);
+    workspace.tabIds.splice(clamp(index, 0, workspace.tabIds.length), 0, tabId);
+    this.emit("change");
+  }
+
+  setDark(dark: boolean) {
+    this.dark = dark;
+    for (const pane of this.panes.values()) pane.setDark(dark);
+  }
+
+  /**
+   * Refreshes every tab's directory with one `lsof` for all the shells, since
+   * nothing tells us when a shell cd's. Emits `change` only if one moved.
+   */
+  async pollCwds() {
+    const panes = [...this.panes.values()];
+    if (panes.length === 0) return;
+
+    const byPid = await shellCwds(panes.map((pane) => pane.pid));
+    let changed = false;
+    for (const pane of panes) {
+      const cwd = byPid.get(pane.pid);
+      if (!cwd || this.cwds.get(pane.id) === cwd) continue;
+      this.cwds.set(pane.id, cwd);
+      changed = true;
+    }
+    if (changed) this.emit("change");
   }
 
   select(workspaceId: string, tabId?: string) {
@@ -293,6 +341,7 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     return {
       id,
       title: this.panes.get(id)?.title ?? "",
+      cwd: this.cwds.get(id) ?? null,
       agent: this.agents.get(id) ?? null,
     };
   }
@@ -301,6 +350,7 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     this.panes.delete(tabId);
     this.agents.delete(tabId);
     this.claudeSessions.delete(tabId);
+    this.cwds.delete(tabId);
 
     const workspace = this.workspaces.find((w) => w.tabIds.includes(tabId));
     if (workspace) {
@@ -338,6 +388,26 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
 // versions), ✳ when idle.
 const CLAUDE_WORKING_TITLE = /^[◐◑◒◓\u2800-\u28ff]/u;
 const CLAUDE_IDLE_TITLE = /^✳/u;
+
+/** The working directory of each process, by pid, in one `lsof` call. */
+function shellCwds(pids: number[]): Promise<Map<number, string>> {
+  return new Promise((resolve) => {
+    execFile("lsof", ["-a", "-d", "cwd", "-p", pids.join(","), "-Fpn"], (_error, stdout) => {
+      // lsof exits non-zero if any pid is gone, but still reports the rest.
+      const cwds = new Map<number, string>();
+      let pid = 0;
+      for (const line of (stdout ?? "").split("\n")) {
+        if (line.startsWith("p")) pid = Number(line.slice(1));
+        else if (line.startsWith("n") && pid) cwds.set(pid, line.slice(1));
+      }
+      resolve(cwds);
+    });
+  });
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
 
 function shortId(): string {
   return randomUUID().slice(0, 8);

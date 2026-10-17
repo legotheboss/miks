@@ -263,6 +263,51 @@ test("a session that ended isn't resumed", async () => {
   expect(daemon.workspaces.getState().workspaces).toHaveLength(1);
 });
 
+test("workspaces and tabs move where they're dropped", async () => {
+  const [a, b, c] = [1, 2, 3].map((n) => daemon.workspaces.createWorkspace({ cwd: home, title: `W${n}` }));
+  const order = () => daemon.workspaces.getState().workspaces.map((w) => w.title);
+
+  daemon.workspaces.moveWorkspace(c, 0);
+  expect(order()).toEqual(["W3", "W1", "W2"]);
+  daemon.workspaces.moveWorkspace(c, 99);
+  expect(order()).toEqual(["W1", "W2", "W3"]);
+
+  const first = daemon.workspaces.getState().workspaces[0].tabs[0].id;
+  const second = daemon.workspaces.createTab(a)!;
+  const third = daemon.workspaces.createTab(a)!;
+  daemon.workspaces.moveTab(third, 0);
+  expect(daemon.workspaces.getState().workspaces[0].tabs.map((t) => t.id)).toEqual([third, first, second]);
+  void b;
+});
+
+test("each tab reports the directory its shell is in", async () => {
+  daemon.workspaces.createWorkspace({ cwd: home });
+  const tabId = activeTab(daemon.workspaces.getState());
+  const subdir = path.join(home, "elsewhere");
+  fs.mkdirSync(subdir);
+
+  daemon.workspaces.getPane(tabId)!.write(`cd '${subdir}'\n`);
+  await waitFor(async () => {
+    await daemon.workspaces.pollCwds();
+    return daemon.workspaces.getState().workspaces[0].tabs[0].cwd === fs.realpathSync(subdir);
+  });
+});
+
+test("programs that set mode 2031 hear when the appearance changes", async () => {
+  daemon.workspaces.createWorkspace({ cwd: home });
+  const tabId = activeTab(daemon.workspaces.getState());
+  const pane = daemon.workspaces.getPane(tabId)!;
+
+  // Ask for reports, then read what arrives on stdin, as Claude Code would:
+  // the current scheme right away (Claude never asks for it), then the change.
+  pane.write("stty -echo -icanon; printf '\\033[?2031h'; dd bs=1 count=18 2>/dev/null | od -An -c\n");
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  daemon.workspaces.setDark(false);
+
+  const report = (n: number) => `033\\s+\\[\\s+\\?\\s+9\\s+9\\s+7\\s+;\\s+${n}\\s+n`;
+  await waitFor(() => paneText(tabId).then((text) => new RegExp(`${report(1)}[\\s\\S]*${report(2)}`).test(text)));
+});
+
 test("the hook script posts to the daemon from inside a pane", async () => {
   daemon.workspaces.createWorkspace({ cwd: home });
   const tabId = activeTab(daemon.workspaces.getState());

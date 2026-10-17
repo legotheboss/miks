@@ -2,31 +2,53 @@ import { colors } from "crosswing/colors";
 import { fonts } from "crosswing/fonts";
 import { Plus } from "lucide-react";
 import { Workspace } from "miks/shared/protocol";
-import { HTMLAttributes, KeyboardEvent, useState } from "react";
+import { Fragment, HTMLAttributes, KeyboardEvent, useState } from "react";
 import { styled } from "styled-components";
 import { daemon } from "./daemon";
+import { useDraggable } from "./draggable/useDraggable";
+import { displayPath, useSettings } from "./settings";
 import { STATUS_LABELS, waitingMessage, workspaceStatus, workspaceTitle } from "./status";
 import { StatusDot } from "./StatusDot";
+
+const DRAG_GROUP = "workspaces";
 
 export function Sidebar({
   workspaces,
   activeWorkspaceId,
+  home,
   ...rest
 }: HTMLAttributes<HTMLDivElement> & {
   workspaces: Workspace[];
   activeWorkspaceId: string | null;
+  home: string;
 }) {
+  // Press and hold a workspace to drag it somewhere else in the list.
+  useDraggable({
+    group: DRAG_GROUP,
+    lockAxis: "y",
+    onDrop: (workspaceId, target) =>
+      daemon.send({ type: "moveWorkspace", workspaceId, index: dropIndex(workspaces, workspaceId, target) }),
+  });
+
   return (
     <StyledSidebar {...rest}>
       <div className="titlebar" />
-      <div className="workspaces">
+      <div className="workspaces" data-draggable-root>
+        <WorkspaceDropTarget data-draggable-target="top" data-draggable-group={DRAG_GROUP} />
         {workspaces.map((workspace, index) => (
-          <WorkspaceRow
-            key={workspace.id}
-            workspace={workspace}
-            shortcut={index < 9 ? `⌘${index + 1}` : undefined}
-            selected={workspace.id === activeWorkspaceId}
-          />
+          <Fragment key={workspace.id}>
+            <WorkspaceRow
+              workspace={workspace}
+              home={home}
+              shortcut={index < 9 ? `⌘${index + 1}` : undefined}
+              selected={workspace.id === activeWorkspaceId}
+            />
+            <WorkspaceDropTarget
+              data-draggable-target={`after:${workspace.id}`}
+              data-draggable-group={DRAG_GROUP}
+              data-draggable-related-id={workspace.id}
+            />
+          </Fragment>
         ))}
       </div>
       <button className="new-workspace" onClick={() => daemon.send({ type: "createWorkspace" })}>
@@ -56,7 +78,6 @@ export const StyledSidebar = styled.div`
     overflow-y: auto;
     display: flex;
     flex-flow: column;
-    gap: 2px;
     padding: 0 8px;
   }
 
@@ -85,16 +106,42 @@ export const StyledSidebar = styled.div`
   }
 `;
 
+/**
+ * Where a drop lands, as an index in the list without the dragged item:
+ * targets are "top" or `after:<id>`, and sit between the rows.
+ */
+export function dropIndex(items: { id: string }[], movingId: string, target: string): number {
+  const [kind, afterId] = target.split(":");
+  if (kind !== "after") return 0;
+  return items.filter((item) => item.id !== movingId).findIndex((item) => item.id === afterId) + 1;
+}
+
+/** The gap a dragged row opens up where it would land. */
+export const WorkspaceDropTarget = styled.div`
+  flex-shrink: 0;
+  height: var(--target-height, 2px);
+  border-radius: 8px;
+
+  &[data-draggable-hover="true"] {
+    background: ${colors.buttonBackgroundGlow()};
+  }
+`;
+
 function WorkspaceRow({
   workspace,
+  home,
   shortcut,
   selected,
 }: {
   workspace: Workspace;
+  home: string;
   shortcut?: string;
   selected: boolean;
 }) {
+  const { hidePathPrefix } = useSettings();
   const [renaming, setRenaming] = useState(false);
+  const activeTab = workspace.tabs.find((tab) => tab.id === workspace.activeTabId);
+  const cwd = activeTab?.cwd ?? workspace.cwd;
   const status = workspaceStatus(workspace);
   const message = status === "waiting" ? waitingMessage(workspace) : null;
   const title = workspaceTitle(workspace);
@@ -110,6 +157,8 @@ function WorkspaceRow({
 
   return (
     <StyledWorkspaceRow
+      data-draggable-id={workspace.id}
+      data-draggable-group={DRAG_GROUP}
       data-selected={selected}
       data-status={status ?? undefined}
       onClick={() => daemon.send({ type: "select", workspaceId: workspace.id })}
@@ -131,6 +180,9 @@ function WorkspaceRow({
         )}
         {shortcut && !renaming && <div className="shortcut">{shortcut}</div>}
       </div>
+      <div className="cwd" title={cwd}>
+        {displayPath(cwd, hidePathPrefix, home)}
+      </div>
       <div className="bottom">
         {status && <StatusDot status={status} />}
         <div className="detail">
@@ -148,9 +200,16 @@ const StyledWorkspaceRow = styled.div`
   padding: 8px 10px;
   border-radius: 8px;
   cursor: default;
+  user-select: none;
 
   &:hover {
     background: ${colors.buttonBackgroundGlow()};
+  }
+
+  /* The copy that follows the pointer while dragging. */
+  &[data-dragging="true"] {
+    background: ${colors.textBackgroundPanel()};
+    box-shadow: 0 6px 20px rgb(0 0 0 / 0.25);
   }
 
   &[data-selected="true"] {
@@ -191,6 +250,14 @@ const StyledWorkspaceRow = styled.div`
       font: ${fonts.display({ size: 11 })};
       opacity: 0.7;
     }
+  }
+
+  > .cwd {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: ${colors.textSecondary()};
+    font: ${fonts.display({ size: 12 })};
   }
 
   > .bottom {

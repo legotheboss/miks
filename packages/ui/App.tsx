@@ -1,11 +1,14 @@
 import { colors } from "crosswing/colors";
 import { fonts } from "crosswing/fonts";
-import { DaemonState } from "miks/shared/protocol";
-import { useEffect } from "react";
+import { useMatchMedia } from "crosswing/hooks/useMatchMedia";
+import type { AgentStatus, DaemonState } from "miks/shared/protocol";
+import { DEFAULT_SETTINGS } from "miks/shared/settings";
+import { useEffect, useRef } from "react";
 import { styled } from "styled-components";
 import { daemon, useDaemon } from "./daemon";
-import { DEFAULT_FONT_SIZE, getFontSize, setFontSize } from "./fontSize";
+import { getSettings, setFontSize, useSettings } from "./settings";
 import { Sidebar } from "./Sidebar";
+import { workspaceTitle } from "./status";
 import { TabBar } from "./TabBar";
 import { TERMINAL_BACKGROUND, TerminalView } from "./TerminalView";
 
@@ -14,6 +17,8 @@ export function App() {
 
   useEffect(() => daemon.onCommand(runCommand), []);
   useSeenTracking(state);
+  useAppearanceReporting(connected);
+  useAgentNotifications(state);
 
   if (!connected || !state) {
     return (
@@ -31,7 +36,12 @@ export function App() {
 
   return (
     <StyledApp>
-      <Sidebar className="sidebar" workspaces={state.workspaces} activeWorkspaceId={state.activeWorkspaceId} />
+      <Sidebar
+        className="sidebar"
+        workspaces={state.workspaces}
+        activeWorkspaceId={state.activeWorkspaceId}
+        home={state.home}
+      />
       <div className="main">
         {activeWorkspace ? <TabBar workspace={activeWorkspace} /> : <div className="empty-bar" />}
         <div className="terminals">
@@ -130,11 +140,11 @@ export const StyledApp = styled.div`
 function runCommand(command: string) {
   switch (command) {
     case "fontBigger":
-      return setFontSize(getFontSize() + 1);
+      return setFontSize(getSettings().fontSize + 1);
     case "fontSmaller":
-      return setFontSize(getFontSize() - 1);
+      return setFontSize(getSettings().fontSize - 1);
     case "fontReset":
-      return setFontSize(DEFAULT_FONT_SIZE);
+      return setFontSize(DEFAULT_SETTINGS.fontSize);
   }
 
   const state = daemon.getSnapshot().state;
@@ -203,4 +213,61 @@ function useSeenTracking(state: DaemonState | null) {
     window.addEventListener("focus", markSeen);
     return () => window.removeEventListener("focus", markSeen);
   }, [doneTabId]);
+}
+
+/**
+ * Tells the daemon whether we're light or dark, now and whenever it changes,
+ * so programs that follow the terminal's color scheme (Claude Code, set to its
+ * "auto" theme) switch with the system.
+ */
+function useAppearanceReporting(connected: boolean) {
+  const dark = useMatchMedia("(prefers-color-scheme: dark)");
+
+  useEffect(() => {
+    if (connected) daemon.send({ type: "appearance", dark });
+  }, [connected, dark]);
+}
+
+/**
+ * A notification when an agent finishes or needs you, unless you're already
+ * looking at it. Only for changes seen while connected: the statuses a fresh
+ * connection reports are old news.
+ */
+function useAgentNotifications(state: DaemonState | null) {
+  const { notifications } = useSettings();
+  const previous = useRef<Map<string, AgentStatus | undefined> | null>(null);
+
+  useEffect(() => {
+    if (!state) return;
+
+    const statuses = new Map<string, AgentStatus | undefined>();
+    for (const workspace of state.workspaces) {
+      for (const tab of workspace.tabs) statuses.set(tab.id, tab.agent?.status);
+    }
+
+    const before = previous.current;
+    previous.current = statuses;
+    if (!before || !notifications) return;
+
+    for (const workspace of state.workspaces) {
+      for (const tab of workspace.tabs) {
+        const status = tab.agent?.status;
+        if (status !== "done" && status !== "waiting") continue;
+        if (!before.has(tab.id) || before.get(tab.id) === status) continue;
+
+        const onScreen = workspace.id === state.activeWorkspaceId && tab.id === workspace.activeTabId;
+        if (onScreen && document.hasFocus()) continue;
+
+        const notification = new Notification(workspaceTitle(workspace), {
+          body: status === "waiting" ? (tab.agent?.message ?? "Needs your input") : "Done",
+          // One per tab: a newer status replaces an older one still showing.
+          tag: tab.id,
+        });
+        notification.onclick = () => {
+          window.miks?.focus();
+          daemon.send({ type: "select", workspaceId: workspace.id, tabId: tab.id });
+        };
+      }
+    }
+  }, [state, notifications]);
 }

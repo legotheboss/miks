@@ -3,17 +3,22 @@
 // connection per page; components read state with `useDaemon` and terminals
 // subscribe to their pane's stream with `daemon.stream`.
 import { ClientMessage, DaemonMessage, DaemonState } from "miks/shared/protocol";
+import type { Settings } from "miks/shared/settings";
 import { useSyncExternalStore } from "react";
 
 type Unsubscribe = () => void;
 
-type MiksBridge = {
+export type MiksBridge = {
   connect(): void;
   send(message: string): void;
   onMessage(listener: (message: string) => void): Unsubscribe;
   onStatus(listener: (status: { connected: boolean; error?: string }) => void): Unsubscribe;
   onCommand(listener: (command: string) => void): Unsubscribe;
   pathForFile(file: File): string;
+  getSettings(): Settings;
+  setSettings(changes: Partial<Settings>): void;
+  onSettings(listener: (settings: Settings) => void): Unsubscribe;
+  focus(): void;
 };
 
 declare global {

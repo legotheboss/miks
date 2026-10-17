@@ -2,10 +2,16 @@ import { colors, getBuilderVarCSS } from "crosswing/colors";
 import { CrosswingApp } from "crosswing/app";
 import { CrosswingDesktopRootStyle } from "crosswing/containers";
 import { fonts, GlobalFontFace } from "crosswing/fonts";
-import { StrictMode } from "react";
+import { ModalRootProvider } from "crosswing/modals/context";
+import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { createGlobalStyle } from "styled-components";
-import { App } from "./App";
+import { Preferences } from "./Preferences";
+
+// The main window, or the Settings window (opened at #preferences). The app
+// is loaded lazily so the Settings window never connects to the daemon.
+const App = lazy(() => import("./App").then((module) => ({ default: module.App })));
+const isPreferences = location.hash === "#preferences";
 
 const RootStyle = createGlobalStyle`
   body {
@@ -38,7 +44,15 @@ root.render(
     <CrosswingDesktopRootStyle />
     <RootStyle />
     <CrosswingApp faces={[systemUI]} fonts={miksFonts}>
-      <App />
+      <ModalRootProvider allowDesktopPresentation>
+        {isPreferences ? (
+          <Preferences />
+        ) : (
+          <Suspense>
+            <App />
+          </Suspense>
+        )}
+      </ModalRootProvider>
     </CrosswingApp>
   </StrictMode>,
 );

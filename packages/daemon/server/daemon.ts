@@ -51,6 +51,9 @@ export async function serve({
   if (saved && restored) workspaces.restore(saved);
   const persistence = statePath ? persist(workspaces, statePath) : null;
 
+  const cwdPoll = setInterval(() => workspaces.pollCwds(), 2000);
+  cwdPoll.unref();
+
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://miks");
 
@@ -123,6 +126,12 @@ export async function serve({
         case "createTab":
           workspaces.createTab(message.workspaceId);
           return;
+        case "moveWorkspace":
+          return workspaces.moveWorkspace(message.workspaceId, message.index);
+        case "moveTab":
+          return workspaces.moveTab(message.tabId, message.index);
+        case "appearance":
+          return workspaces.setDark(message.dark);
         case "closeTab":
           return workspaces.closeTab(message.tabId);
         case "select":
@@ -177,6 +186,7 @@ export async function serve({
     close: async () => {
       // Saved before the panes go: each one exiting removes its tab, and
       // that layout, emptied, is not the one to come back to.
+      clearInterval(cwdPoll);
       await persistence?.final();
       workspaces.killAll();
       for (const socket of sockets) socket.terminate();

@@ -26,6 +26,8 @@ export type Tab = {
   id: string;
   /** The title the program set (OSC 0/2), or the shell's name. */
   title: string;
+  /** Where the tab's shell is, checked every couple of seconds. */
+  cwd: string | null;
   agent: AgentState | null;
 };
 
@@ -39,6 +41,8 @@ export type Workspace = {
 };
 
 export type DaemonState = {
+  /** The daemon's home directory, for showing paths with `~`. */
+  home: string;
   workspaces: Workspace[];
   activeWorkspaceId: string | null;
 };
@@ -55,6 +59,12 @@ export type ClientMessage =
   /** An empty title goes back to following the active tab. */
   | { type: "renameWorkspace"; workspaceId: string; title: string }
   | { type: "createTab"; workspaceId: string }
+  /** Moves a workspace to a position in the sidebar (counted without it). */
+  | { type: "moveWorkspace"; workspaceId: string; index: number }
+  /** Moves a tab to a position in its workspace's tab bar (counted without it). */
+  | { type: "moveTab"; tabId: string; index: number }
+  /** The UI's light or dark appearance, for programs that follow it. */
+  | { type: "appearance"; dark: boolean }
   | { type: "closeTab"; tabId: string }
   /** Selecting a tab also marks its agent's `done` as seen. */
   | { type: "select"; workspaceId: string; tabId?: string }

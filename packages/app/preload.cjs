@@ -9,6 +9,12 @@ contextBridge.exposeInMainWorld("miks", {
   onMessage: (listener) => subscribe("miks:message", listener),
   onStatus: (listener) => subscribe("miks:status", listener),
   onCommand: (listener) => subscribe("miks:command", listener),
+  /** Settings are read synchronously, so the first render already has them. */
+  getSettings: () => ipcRenderer.sendSync("miks:getSettings"),
+  setSettings: (changes) => ipcRenderer.send("miks:setSettings", changes),
+  onSettings: (listener) => subscribe("miks:settings", listener),
+  /** Brings the main window forward (a notification was clicked). */
+  focus: () => ipcRenderer.send("miks:focus"),
   /** The path of a dropped file; File.path no longer exists in Electron. */
   pathForFile: (file) => webUtils.getPathForFile(file),
 });

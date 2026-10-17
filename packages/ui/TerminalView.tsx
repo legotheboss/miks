@@ -8,7 +8,7 @@ import { useMatchMedia } from "crosswing/hooks/useMatchMedia";
 import { DragEvent, HTMLAttributes, useEffect, useRef } from "react";
 import { styled } from "styled-components";
 import { daemon } from "./daemon";
-import { getFontSize, useFontSize } from "./fontSize";
+import { getSettings, useSettings } from "./settings";
 
 /**
  * One pane's terminal. Every tab's terminal stays mounted (stacked, with only
@@ -28,12 +28,12 @@ export function TerminalView({
   const activeRef = useRef(active);
   activeRef.current = active;
   const dark = useMatchMedia("(prefers-color-scheme: dark)");
-  const fontSize = useFontSize();
+  const { fontSize } = useSettings();
 
   useEffect(() => {
     const terminal = new Terminal({
       fontFamily: `"SF Mono", Menlo, Monaco, monospace`,
-      fontSize: getFontSize(),
+      fontSize: getSettings().fontSize,
       lineHeight: 1.15,
       scrollback: 10_000,
       allowProposedApi: true,

@@ -56,6 +56,9 @@ export class Pane extends EventEmitter<{
 }> {
   readonly id: string;
   title: string;
+  /** Whether the program asked to hear about color scheme changes (DEC mode 2031). */
+  private reportsColorScheme = false;
+  private dark = true;
 
   private readonly pty: pty.IPty;
   private readonly terminal: InstanceType<typeof Terminal>;
@@ -69,6 +72,7 @@ export class Pane extends EventEmitter<{
     cwd,
     env,
     command = [process.env.SHELL || "/bin/zsh", "-l"],
+    dark = true,
     cols = 80,
     rows = 24,
   }: {
@@ -77,11 +81,14 @@ export class Pane extends EventEmitter<{
     env: Record<string, string>;
     /** What to run; a login shell unless told otherwise (tests are). */
     command?: string[];
+    /** Whether the UI is in dark mode, for color scheme reports. */
+    dark?: boolean;
     cols?: number;
     rows?: number;
   }) {
     super();
     this.id = id;
+    this.dark = dark;
 
     const [file, ...args] = command;
     this.title = path.basename(file);
@@ -93,6 +100,28 @@ export class Pane extends EventEmitter<{
       allowProposedApi: true,
     });
     this.terminal.loadAddon(this.serializer as any);
+    // Color scheme reporting, which xterm.js doesn't do itself. Programs like
+    // Claude Code switch between their light and dark themes with it: they
+    // set mode 2031 to be told when the scheme changes, and ask with CSI ? 996 n.
+    this.terminal.parser.registerCsiHandler({ prefix: "?", final: "h" }, (params) => {
+      if (params.includes(2031) && !this.reportsColorScheme) {
+        this.reportsColorScheme = true;
+        // Say where things stand now, not just when they change: Claude Code
+        // turns this on at startup and never asks.
+        this.reportColorScheme();
+      }
+      return false;
+    });
+    this.terminal.parser.registerCsiHandler({ prefix: "?", final: "l" }, (params) => {
+      if (params.includes(2031)) this.reportsColorScheme = false;
+      return false;
+    });
+    this.terminal.parser.registerCsiHandler({ prefix: "?", final: "n" }, (params) => {
+      if (params[0] !== 996) return false;
+      this.reportColorScheme();
+      return true;
+    });
+
     this.terminal.onTitleChange((title) => {
       const previous = this.title;
       this.title = title;
@@ -163,6 +192,21 @@ export class Pane extends EventEmitter<{
 
   kill() {
     this.pty.kill("SIGHUP");
+  }
+
+  get pid(): number {
+    return this.pty.pid;
+  }
+
+  /** Follows the UI's light or dark appearance, telling the program if it asked. */
+  setDark(dark: boolean) {
+    if (dark === this.dark) return;
+    this.dark = dark;
+    if (this.reportsColorScheme) this.reportColorScheme();
+  }
+
+  private reportColorScheme() {
+    this.pty.write(`\x1b[?997;${this.dark ? 1 : 2}n`);
   }
 
   /** The shell's working directory, or null if it can't be read. */
