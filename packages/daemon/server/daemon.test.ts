@@ -208,6 +208,61 @@ test("Claude's idle reminder clears a turn that never ended", async () => {
   expect(status()).toBe("idle");
 });
 
+test("a restarted daemon brings back the layout, each tab's directory, and its Claude session", async () => {
+  // Its own pair of daemons, persisting to one file.
+  await daemon.close();
+  const statePath = path.join(home, "state.json");
+  const socketPath = path.join(home, "miks.sock");
+  const subdir = path.join(home, "sub dir");
+  fs.mkdirSync(subdir);
+
+  const first = await serve({ socketPath, statePath, command: COMMAND, claudeCommand: "echo RESUMING" });
+  expect(first.restored).toBe(false);
+  const workspaceId = first.workspaces.createWorkspace({ cwd: home });
+  first.workspaces.renameWorkspace(workspaceId, "Agents");
+  const shellTab = activeTab(first.workspaces.getState());
+  const claudeTab = first.workspaces.createTab(workspaceId)!;
+  await postHook(claudeTab, { hook_event_name: "SessionStart", session_id: "1234abcd-0000-4000-8000-000000000000" });
+
+  // The shell moves; the saved layout should follow it there.
+  first.workspaces.getPane(shellTab)!.write(`cd '${subdir}'\n`);
+  await waitFor(async () => (await first.workspaces.getPane(shellTab)!.cwd()) === fs.realpathSync(subdir));
+  first.workspaces.select(workspaceId, shellTab);
+  await first.close();
+
+  daemon = await serve({ socketPath, statePath, command: COMMAND, claudeCommand: "echo RESUMING" });
+  expect(daemon.restored).toBe(true);
+
+  const [workspace] = daemon.workspaces.getState().workspaces;
+  expect(workspace.title).toBe("Agents");
+  expect(workspace.tabs).toHaveLength(2);
+  // The same tab is selected as before.
+  expect(workspace.activeTabId).toBe(workspace.tabs[0].id);
+
+  const [restoredShell, restoredClaude] = workspace.tabs;
+  await waitFor(async () => (await daemon.workspaces.getPane(restoredShell.id)!.cwd()) === fs.realpathSync(subdir));
+  await waitFor(() =>
+    paneText(restoredClaude.id).then((text) => text.includes("RESUMING --resume 1234abcd-0000-4000-8000-000000000000")),
+  );
+});
+
+test("a session that ended isn't resumed", async () => {
+  await daemon.close();
+  const statePath = path.join(home, "state.json");
+  const socketPath = path.join(home, "miks.sock");
+
+  const first = await serve({ socketPath, statePath, command: COMMAND, claudeCommand: "echo RESUMING" });
+  first.workspaces.createWorkspace({ cwd: home });
+  const tabId = activeTab(first.workspaces.getState());
+  await postHook(tabId, { hook_event_name: "SessionStart", session_id: "ended-session" });
+  await postHook(tabId, { hook_event_name: "SessionEnd", session_id: "ended-session" });
+  await first.close();
+
+  expect(JSON.parse(fs.readFileSync(statePath, "utf8")).workspaces[0].tabs[0].claudeSessionId).toBeUndefined();
+  daemon = await serve({ socketPath, statePath, command: COMMAND });
+  expect(daemon.workspaces.getState().workspaces).toHaveLength(1);
+});
+
 test("the hook script posts to the daemon from inside a pane", async () => {
   daemon.workspaces.createWorkspace({ cwd: home });
   const tabId = activeTab(daemon.workspaces.getState());

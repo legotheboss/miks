@@ -62,13 +62,29 @@ function startDaemon() {
   env.PATH = [env.PATH, "/opt/homebrew/bin", "/usr/local/bin"].filter(Boolean).join(":");
 
   // Detached, so it outlives us: that's the whole point.
-  const child = spawn(process.execPath, [daemonMain, "serve"], {
+  const child = spawn(helperPath(), [daemonMain, "serve"], {
     detached: true,
     stdio: ["ignore", log, log],
     env,
   });
   child.unref();
   fs.closeSync(log);
+}
+
+/**
+ * The plain helper inside our bundle ("Miks Helper", or "Electron Helper" in
+ * development), which the daemon runs on. Not our own executable: macOS
+ * takes launching an app's main binary as launching the app, and bounces it
+ * in the Dock waiting for a window that never comes. The helper is
+ * LSUIElement, so it has no Dock icon at all.
+ */
+function helperPath(): string {
+  const name = path.basename(process.execPath);
+  const helper = path.join(
+    path.dirname(process.execPath),
+    `../Frameworks/${name} Helper.app/Contents/MacOS/${name} Helper`,
+  );
+  return fs.existsSync(helper) ? helper : process.execPath;
 }
 
 /**

@@ -1,5 +1,6 @@
 import { SerializeAddon } from "@xterm/addon-serialize";
 import headless from "@xterm/headless";
+import { execFile } from "child_process";
 import { EventEmitter } from "events";
 import * as pty from "node-pty";
 import path from "path";
@@ -162,6 +163,16 @@ export class Pane extends EventEmitter<{
 
   kill() {
     this.pty.kill("SIGHUP");
+  }
+
+  /** The shell's working directory, or null if it can't be read. */
+  cwd(): Promise<string | null> {
+    return new Promise((resolve) => {
+      execFile("lsof", ["-a", "-p", String(this.pty.pid), "-d", "cwd", "-Fn"], (error, stdout) => {
+        const line = stdout?.split("\n").find((l) => l.startsWith("n"));
+        resolve(!error && line ? line.slice(1) : null);
+      });
+    });
   }
 }
 

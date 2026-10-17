@@ -42,7 +42,10 @@ so before doing it to the real one.
   by bundle ID: the daemon runs on the same binary, so never `pkill -x Miks`.
   The running daemon keeps its old code until it next starts.
 - Real state lives in `~/Library/Application Support/Miks` (socket,
-  `daemon.log`, and Electron's profile in `UI/`). The dev build and Miks.app
+  `daemon.log`, `state.json`, and Electron's profile in `UI/`). The daemon
+  saves its layout to `state.json` (each tab's cwd, via `lsof`, and its Claude
+  session ID from the hooks) and restores it on start, resuming those
+  sessions with `claude --resume`. The dev build and Miks.app
   share it, and so share one daemon.
 - The icon: `packages/app/icon/make-icon.sh` turns `source.png` (full-bleed
   square) into `icon.png` (dev Dock icon) and `Miks.icns`.
@@ -64,10 +67,12 @@ resizes); keep it passing.
 - The daemon and Electron main run TypeScript straight from source (Node 24 /
   Electron 44 type stripping): use `.ts` import extensions in the daemon,
   `import type` for types (`verbatimModuleSyntax` enforces it), no enums.
-- The daemon runs on the app's own binary as plain Node
-  (`ELECTRON_RUN_AS_NODE`): node-pty's prebuilt binary is Node-API, so no
-  rebuild, nothing installed, and macOS attributes the daemon to Miks. It
-  calls itself `miks-daemon` (`process.title`).
+- The daemon runs on the app's plain helper ("Miks Helper", "Electron Helper"
+  in dev) as Node (`ELECTRON_RUN_AS_NODE`): node-pty's prebuilt binary is
+  Node-API, so no rebuild and nothing installed, and macOS attributes the
+  daemon to Miks. Not the main binary: launching that makes macOS bounce
+  Miks in the Dock until it gives up. It calls itself `miks-daemon`
+  (`process.title`).
 - Inside Miks.app, `node_modules/miks` is a stub package re-exporting
   `packages/daemon/shared`: Node won't strip types under node_modules, and the
   packager rewrites symlinks to absolute paths, which codesign rejects.

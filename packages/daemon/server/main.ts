@@ -1,5 +1,5 @@
 import fs from "fs";
-import { logPath, socketPath } from "../shared/paths.ts";
+import { logPath, socketPath, statePath } from "../shared/paths.ts";
 import { serve } from "./daemon.ts";
 
 const [command] = process.argv.slice(2);
@@ -8,10 +8,10 @@ if (command === "serve") {
   // What `ps` and `pkill` see, instead of the binary it runs on.
   process.title = "miks-daemon";
 
-  const daemon = await serve({ socketPath: socketPath() });
+  const daemon = await serve({ socketPath: socketPath(), statePath: statePath() });
 
   // Start with something to look at.
-  daemon.workspaces.createWorkspace();
+  if (!daemon.restored) daemon.workspaces.createWorkspace();
 
   log(`Listening on ${socketPath()} (pid ${process.pid}).`);
 

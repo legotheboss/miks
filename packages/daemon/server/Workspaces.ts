@@ -4,6 +4,18 @@ import os from "os";
 import type { AgentState, DaemonState, Tab } from "../shared/protocol.ts";
 import { Pane } from "./Pane.ts";
 
+/** What survives a daemon restart, in `state.json`. */
+export type SavedState = {
+  version: 1;
+  activeWorkspace: number;
+  workspaces: {
+    title: string | null;
+    cwd: string;
+    activeTab: number;
+    tabs: { cwd: string; claudeSessionId?: string }[];
+  }[];
+};
+
 type WorkspaceRecord = {
   id: string;
   title: string | null;
@@ -22,14 +34,27 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
   private activeWorkspaceId: string | null = null;
   private readonly panes = new Map<string, Pane>();
   private readonly agents = new Map<string, AgentState>();
+  /** The Claude Code session in each tab, from its hooks, for resuming it. */
+  private readonly claudeSessions = new Map<string, string>();
 
   private readonly socketPath: string;
   private readonly command?: string[];
+  private readonly claudeCommand: string;
 
-  constructor({ socketPath, command }: { socketPath: string; command?: string[] }) {
+  constructor({
+    socketPath,
+    command,
+    claudeCommand = "claude",
+  }: {
+    socketPath: string;
+    command?: string[];
+    /** What resumes a Claude session; tests substitute something harmless. */
+    claudeCommand?: string;
+  }) {
     super();
     this.socketPath = socketPath;
     this.command = command;
+    this.claudeCommand = claudeCommand;
   }
 
   getState(): DaemonState {
@@ -79,15 +104,18 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     this.emit("change");
   }
 
-  createTab(workspaceId: string): string | undefined {
+  createTab(
+    workspaceId: string,
+    { cwd, resumeClaudeSession }: { cwd?: string; resumeClaudeSession?: string } = {},
+  ): string | undefined {
     const workspace = this.findWorkspace(workspaceId);
     if (!workspace) return;
 
     const id = shortId();
     const pane = new Pane({
       id,
-      cwd: workspace.cwd,
-      command: this.command,
+      cwd: cwd ?? workspace.cwd,
+      command: resumeClaudeSession ? this.resumeCommand(resumeClaudeSession) : this.command,
       env: { MIKS_PANE_ID: id, MIKS_SOCKET: this.socketPath },
     });
     this.panes.set(id, pane);
@@ -135,6 +163,10 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     if (!this.panes.has(tabId)) return;
 
     const event: string | undefined = payload?.hook_event_name;
+    // Session IDs are UUIDs; anything else isn't one we'd put in a command.
+    const sessionId = payload?.session_id;
+    if (typeof sessionId === "string" && /^[\w-]+$/.test(sessionId)) this.claudeSessions.set(tabId, sessionId);
+
     const set = (status: AgentState["status"], message?: string) =>
       this.agents.set(tabId, { kind: "claude", status, message, since: Date.now() });
 
@@ -164,6 +196,7 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
         break;
       case "SessionEnd":
         this.agents.delete(tabId);
+        this.claudeSessions.delete(tabId);
         break;
       default:
         return;
@@ -187,6 +220,70 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     this.agents.set(tabId, { ...agent, status: "idle", message: undefined, since: Date.now() });
   }
 
+  /**
+   * The layout as it stands, with each tab's current directory (where its
+   * shell has cd'ed to, not where it started) and its Claude session, if any.
+   */
+  async save(): Promise<SavedState> {
+    const workspaces = await Promise.all(
+      this.workspaces.map(async (workspace) => ({
+        title: workspace.title,
+        cwd: workspace.cwd,
+        activeTab: Math.max(0, workspace.tabIds.indexOf(workspace.activeTabId ?? "")),
+        tabs: await Promise.all(
+          workspace.tabIds.map(async (tabId) => ({
+            cwd: (await this.panes.get(tabId)?.cwd()) ?? workspace.cwd,
+            claudeSessionId: this.claudeSessions.get(tabId),
+          })),
+        ),
+      })),
+    );
+
+    return {
+      version: 1,
+      activeWorkspace: Math.max(0, this.workspaces.findIndex((w) => w.id === this.activeWorkspaceId)),
+      workspaces,
+    };
+  }
+
+  /**
+   * Rebuilds a saved layout with fresh shells, each in its tab's directory.
+   * A tab that had a Claude session resumes it, so a daemon restart costs a
+   * moment, not your agents.
+   */
+  restore(saved: SavedState) {
+    for (const savedWorkspace of saved.workspaces) {
+      if (savedWorkspace.tabs.length === 0) continue;
+
+      const workspace: WorkspaceRecord = {
+        id: shortId(),
+        title: savedWorkspace.title,
+        cwd: savedWorkspace.cwd,
+        tabIds: [],
+        activeTabId: null,
+      };
+      this.workspaces.push(workspace);
+
+      for (const tab of savedWorkspace.tabs) {
+        this.createTab(workspace.id, { cwd: tab.cwd, resumeClaudeSession: tab.claudeSessionId });
+      }
+      workspace.activeTabId = workspace.tabIds[savedWorkspace.activeTab] ?? workspace.tabIds[0] ?? null;
+    }
+
+    this.activeWorkspaceId = this.workspaces[saved.activeWorkspace]?.id ?? this.workspaces[0]?.id ?? null;
+    this.emit("change");
+  }
+
+  /**
+   * Resumes a Claude session, then leaves you in an ordinary shell when it
+   * exits. Interactive as well as login, so the shell reads .zshrc, which is
+   * often where `claude` gets onto the PATH.
+   */
+  private resumeCommand(sessionId: string): string[] {
+    const shell = this.command?.[0] ?? (process.env.SHELL || "/bin/zsh");
+    return [shell, "-ilc", `${this.claudeCommand} --resume ${sessionId}; exec ${shell} -l`];
+  }
+
   /** Ends every pane. For tests; the real daemon just exits. */
   killAll() {
     for (const pane of this.panes.values()) pane.kill();
@@ -203,6 +300,7 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
   private removeTab(tabId: string) {
     this.panes.delete(tabId);
     this.agents.delete(tabId);
+    this.claudeSessions.delete(tabId);
 
     const workspace = this.workspaces.find((w) => w.tabIds.includes(tabId));
     if (workspace) {

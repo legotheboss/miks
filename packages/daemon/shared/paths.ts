@@ -16,3 +16,8 @@ export function socketPath(): string {
 export function logPath(): string {
   return path.join(miksHome(), "daemon.log");
 }
+
+/** The layout to restore when the daemon starts. */
+export function statePath(): string {
+  return path.join(miksHome(), "state.json");
+}

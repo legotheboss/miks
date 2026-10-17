@@ -9,6 +9,7 @@
 import { packager } from "@electron/packager";
 import { execFileSync, spawnSync } from "child_process";
 import fs from "fs";
+import { socketPath } from "miks/shared/paths";
 import path from "path";
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -145,17 +146,49 @@ console.log(`Built and verified ${path.relative(root, builtApp)}.`);
 // Swap it into /Applications.
 //
 
-// lsappinfo, unlike AppleScript, doesn't fail on an app macOS hasn't seen yet,
-// and needs no Automation permission.
-const isRunning = () => output("lsappinfo", ["find", `bundleid=${bundleId}`]) !== "";
+// The running UI's processes, from LaunchServices (only the UI registers
+// there; the daemon runs on an LSUIElement helper). By pid rather than through
+// AppleScript, which looks the app up by bundle ID and, once a bundle has been
+// swapped, finds the new one and reports that it isn't running.
+//
+// Except when it doesn't: a daemon started on the main binary (as older
+// builds did) registers too, and this once killed one, and every terminal
+// with it. So also leave out whatever answers as the daemon on its socket,
+// and anything calling itself miks-daemon.
+const daemonPid = () => {
+  const ping = spawnSync("curl", ["-sf", "-m", "2", "--unix-socket", socketPath(), "http://miks/api/ping"], {
+    encoding: "utf8",
+  });
+  return ping.status === 0 ? Number(JSON.parse(ping.stdout).pid) : null;
+};
+const uiPids = () => {
+  const daemon = daemonPid();
+  return output("lsappinfo", ["find", `bundleid=${bundleId}`])
+    .split("\n")
+    .filter(Boolean)
+    .map((asn) => Number(output("lsappinfo", ["info", "-only", "pid", asn.split(": ")[0]]).match(/pid = (\d+)/)?.[1]))
+    .filter((pid) => pid && pid !== daemon)
+    .filter((pid) => spawnSync("ps", ["-p", String(pid), "-o", "comm="], { encoding: "utf8" }).stdout.trim() !== "miks-daemon");
+};
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
-// Asked by bundle ID, not `pkill -x Miks`: the daemon runs on the same
-// binary, and quitting must leave it (and every terminal) alone.
-const wasRunning = isRunning();
+// Never `pkill -x Miks`: the daemon's helper is in this bundle too, and
+// quitting must leave it (and every terminal) alone.
+const running = uiPids();
+const wasRunning = running.length > 0;
 if (wasRunning) {
   console.log("Quitting Miks…");
-  run("osascript", ["-e", `tell application id "${bundleId}" to quit`]);
-  for (let i = 0; i < 50 && isRunning(); i++) await new Promise((resolve) => setTimeout(resolve, 100));
+  // Electron quits cleanly on SIGTERM.
+  for (const pid of running) process.kill(pid, "SIGTERM");
+  for (let i = 0; i < 50 && running.some(alive); i++) await new Promise((resolve) => setTimeout(resolve, 100));
+  if (running.some(alive)) throw new Error("Miks didn't quit; quit it and run this again.");
 }
 
 if (fs.existsSync(installPath)) {

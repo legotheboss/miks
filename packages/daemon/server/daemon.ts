@@ -5,10 +5,13 @@ import path from "path";
 import { WebSocket, WebSocketServer } from "ws";
 import type { ClientMessage, DaemonMessage } from "../shared/protocol.ts";
 import type { PaneViewer } from "./Pane.ts";
-import { Workspaces } from "./Workspaces.ts";
+import { type SavedState, Workspaces } from "./Workspaces.ts";
 
 export type Daemon = {
   workspaces: Workspaces;
+  /** Whether a saved layout was brought back. */
+  restored: boolean;
+  /** Saves the layout (when persisting), then ends every pane. */
   close(): Promise<void>;
 };
 
@@ -21,11 +24,17 @@ export type Daemon = {
  */
 export async function serve({
   socketPath,
+  statePath,
   command,
+  claudeCommand,
 }: {
   socketPath: string;
+  /** Where the layout is saved and restored from; none, no persistence. */
+  statePath?: string;
   /** What each pane runs, instead of a login shell. For tests. */
   command?: string[];
+  /** What resumes a Claude session. For tests. */
+  claudeCommand?: string;
 }): Promise<Daemon> {
   // macOS caps socket paths at 104 bytes and quietly truncates longer ones.
   if (Buffer.byteLength(socketPath) > 103) {
@@ -35,7 +44,12 @@ export async function serve({
   fs.mkdirSync(path.dirname(socketPath), { recursive: true, mode: 0o700 });
   await removeStaleSocket(socketPath);
 
-  const workspaces = new Workspaces({ socketPath, command });
+  const workspaces = new Workspaces({ socketPath, command, claudeCommand });
+
+  const saved = statePath ? readSavedState(statePath) : null;
+  const restored = !!saved?.workspaces.some((w) => w.tabs.length > 0);
+  if (saved && restored) workspaces.restore(saved);
+  const persistence = statePath ? persist(workspaces, statePath) : null;
 
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://miks");
@@ -159,13 +173,69 @@ export async function serve({
 
   return {
     workspaces,
+    restored,
     close: async () => {
+      // Saved before the panes go: each one exiting removes its tab, and
+      // that layout, emptied, is not the one to come back to.
+      await persistence?.final();
       workspaces.killAll();
       for (const socket of sockets) socket.terminate();
       wss.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },
   };
+}
+
+/**
+ * Keeps `state.json` current: shortly after any change, and every so often
+ * for what changes no event announces (a shell cd'ing somewhere).
+ */
+function persist(workspaces: Workspaces, statePath: string) {
+  let stopped = false;
+  let timer: NodeJS.Timeout | null = null;
+  let writing = Promise.resolve();
+
+  const write = (state: SavedState) => {
+    const temporary = `${statePath}.tmp`;
+    fs.writeFileSync(temporary, JSON.stringify(state, null, 2));
+    fs.renameSync(temporary, statePath);
+  };
+
+  const schedule = () => {
+    if (stopped) return;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      writing = writing.then(async () => {
+        const state = await workspaces.save();
+        if (!stopped) write(state);
+      });
+    }, 1000);
+  };
+
+  workspaces.on("change", schedule);
+  const interval = setInterval(schedule, 30_000);
+  interval.unref();
+
+  return {
+    /** One last save, after which nothing more is written. */
+    final: async () => {
+      if (timer) clearTimeout(timer);
+      clearInterval(interval);
+      await writing;
+      const state = await workspaces.save();
+      stopped = true;
+      write(state);
+    },
+  };
+}
+
+function readSavedState(statePath: string): SavedState | null {
+  try {
+    const saved = JSON.parse(fs.readFileSync(statePath, "utf8"));
+    return saved?.version === 1 && Array.isArray(saved.workspaces) ? saved : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
