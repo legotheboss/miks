@@ -91,6 +91,11 @@ resizes); keep it passing.
   sidebar (a PanelLayout) or the window edge sends one, not one per frame.
 - With the sidebar hidden (⌘B), the traffic lights sit over the tab bar,
   which is inset to clear them; the sidebar's minimum width does the same.
+- xterm.js sends a full-screen program at most one wheel report (or arrow
+  key) per wheel event, and scales trackpads down to 0.3, so scrolling in
+  Claude Code crawled next to Ghostty. `ui/wheel.ts` sends one per line's
+  height scrolled instead. The serializer restores mouse tracking but not
+  its SGR encoding (1006), so `Pane.ts` appends that to snapshots.
 - Only attached clients answer terminal queries (the headless emulator's
   replies are dropped, as in VS Code), so each query gets one answer.
 - Panes strip `CMUX_*`, `GHOSTTY_*`, `TERM_PROGRAM*`, `CLAUDE*`,

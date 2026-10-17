@@ -73,6 +73,27 @@ test("a full-screen program comes back on the alternate screen", async () => {
   second.close();
 });
 
+test("a program's mouse reporting comes back with its encoding", async () => {
+  daemon.workspaces.createWorkspace({ cwd: home });
+
+  const first = await connect();
+  const tabId = activeTab(await first.state());
+  first.send({ type: "attach", tabId, cols: 80, rows: 24 });
+  // What Claude Code asks for: button events, reported in SGR encoding.
+  first.send({ type: "input", tabId, data: "printf '\\033[?1002h\\033[?1006hMOUSE%sON' ' '; read\n" });
+  await first.waitForOutput(tabId, "MOUSE ON");
+  first.close();
+
+  const second = await connect();
+  await second.state();
+  second.send({ type: "attach", tabId, cols: 80, rows: 24 });
+  const screen = await second.screen(tabId);
+
+  expect(screen.terminal.modes.mouseTrackingMode).toBe("drag");
+  expect(second.snapshotFor(tabId)).toContain("\x1b[?1006h");
+  second.close();
+});
+
 test("attaching mid-stream neither drops nor repeats output", async () => {
   daemon.workspaces.createWorkspace({ cwd: home });
   const tabId = activeTab(daemon.workspaces.getState());

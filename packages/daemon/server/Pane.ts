@@ -65,6 +65,12 @@ export class Pane extends EventEmitter<{
   private foreground: string;
   /** Whether the program asked to hear about color scheme changes (DEC mode 2031). */
   private reportsColorScheme = false;
+  /**
+   * Whether mouse reports use SGR encoding (DEC mode 1006). The serializer
+   * restores which mouse events a program asked for, but not this, so a
+   * reattached UI would send Claude Code reports it can't read.
+   */
+  private sgrMouse = false;
   private dark = true;
 
   private readonly pty: pty.IPty;
@@ -112,6 +118,7 @@ export class Pane extends EventEmitter<{
     // Claude Code switch between their light and dark themes with it: they
     // set mode 2031 to be told when the scheme changes, and ask with CSI ? 996 n.
     this.terminal.parser.registerCsiHandler({ prefix: "?", final: "h" }, (params) => {
+      if (params.includes(1006)) this.sgrMouse = true;
       if (params.includes(2031) && !this.reportsColorScheme) {
         this.reportsColorScheme = true;
         // Say where things stand now, not just when they change: Claude Code
@@ -121,7 +128,12 @@ export class Pane extends EventEmitter<{
       return false;
     });
     this.terminal.parser.registerCsiHandler({ prefix: "?", final: "l" }, (params) => {
+      if (params.includes(1006)) this.sgrMouse = false;
       if (params.includes(2031)) this.reportsColorScheme = false;
+      return false;
+    });
+    this.terminal.parser.registerEscHandler({ final: "c" }, () => {
+      this.sgrMouse = false;
       return false;
     });
     this.terminal.parser.registerCsiHandler({ prefix: "?", final: "n" }, (params) => {
@@ -176,7 +188,8 @@ export class Pane extends EventEmitter<{
       if (!pending) return; // Detached (or exited) while we waited.
 
       this.attaching.delete(viewer);
-      viewer.snapshot(this.serializer.serialize({ scrollback: SCROLLBACK }), this.terminal.cols, this.terminal.rows);
+      const screen = this.serializer.serialize({ scrollback: SCROLLBACK }) + (this.sgrMouse ? "\x1b[?1006h" : "");
+      viewer.snapshot(screen, this.terminal.cols, this.terminal.rows);
       for (const data of pending) viewer.output(data);
       this.viewers.add(viewer);
     });

@@ -9,6 +9,7 @@ import { DragEvent, HTMLAttributes, useEffect, useRef } from "react";
 import { styled } from "styled-components";
 import { daemon } from "./daemon";
 import { getSettings, useSettings } from "./settings";
+import { handleWheel } from "./wheel";
 
 /**
  * One pane's terminal. Every tab's terminal stays mounted (stacked, with only
@@ -49,10 +50,12 @@ export function TerminalView({
     // window.open is routed to the real browser by the app.
     terminal.loadAddon(new WebLinksAddon((_event, uri) => window.open(uri)));
     terminal.open(containerRef.current!);
+    const wheel = handleWheel(terminal, (data) => daemon.send({ type: "input", tabId, data }));
 
     const unstream = daemon.stream(tabId, (event) => {
       if (event.type === "snapshot") {
         terminal.reset();
+        wheel.reset();
         // A tab that isn't on screen takes the pane's size as it is.
         if (event.cols !== terminal.cols || event.rows !== terminal.rows) {
           terminal.resize(event.cols, event.rows);
