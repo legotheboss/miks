@@ -2,13 +2,11 @@
 
 # Miks
 
-A terminal app for running a bunch of coding agents at once. Workspaces down
-the side, tabs in each, and every workspace's agent status at a glance:
-working, needs you, or done.
+Yo dawg, I heard you like terminals, so I made a terminal for your terminals!
 
-That's it, on purpose. I loved [cmux](https://github.com/manaflow-ai/cmux)
-until it grew a browser, computer use and an 8 GB repo; Miks is the part I
-actually used.
+Miks is a replacement for `Terminal.app` designed for running a bunch of coding agents (like Claude Code) at once. Inspired by `cmux`, Miks has "workspaces" in a sidebar, tabs in each, and your agent's status at a glance: working, needs you, or done.
+
+I enjoyed [cmux](https://github.com/manaflow-ai/cmux) until I realized it bundled a browser, computer use and an 8 GB repo; Miks is the part of it I actually used.
 
 - Workspaces and tabs, drag to reorder; ⌘1–9, ⌘⌃[ ] and ⌘⇧[ ] to get around
 - Live Claude Code status in the sidebar, plus a notification when an agent
