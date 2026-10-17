@@ -169,6 +169,45 @@ test("hooks drive the agent status", async () => {
   expect(status()).toBeUndefined();
 });
 
+test("an interrupted turn ends when Claude's title stops spinning", async () => {
+  daemon.workspaces.createWorkspace({ cwd: home });
+  const tabId = activeTab(daemon.workspaces.getState());
+  const pane = daemon.workspaces.getPane(tabId)!;
+  const status = () => daemon.workspaces.getState().workspaces[0].tabs[0].agent?.status;
+  // Sets the title the way Claude Code does, with OSC 0.
+  const title = async (text: string) => {
+    pane.write(`printf '\\033]0;${text}\\007'\n`);
+    await waitFor(() => daemon.workspaces.getState().workspaces[0].tabs[0].title === text);
+  };
+
+  await title("✳ Claude Code");
+  await postHook(tabId, { hook_event_name: "SessionStart" });
+
+  // A ✳ title still arriving after the prompt went in doesn't end the turn;
+  // only the spinner stopping does.
+  await postHook(tabId, { hook_event_name: "UserPromptSubmit" });
+  await title("✳ Numbers");
+  expect(status()).toBe("working");
+
+  await title("◐ Numbers");
+  await title("◑ Numbers");
+  expect(status()).toBe("working");
+
+  // Esc: no Stop hook, just the title.
+  await title("✳ Numbers");
+  expect(status()).toBe("idle");
+});
+
+test("Claude's idle reminder clears a turn that never ended", async () => {
+  daemon.workspaces.createWorkspace({ cwd: home });
+  const tabId = activeTab(daemon.workspaces.getState());
+  const status = () => daemon.workspaces.getState().workspaces[0].tabs[0].agent?.status;
+
+  await postHook(tabId, { hook_event_name: "UserPromptSubmit" });
+  await postHook(tabId, { hook_event_name: "Notification", notification_type: "idle_prompt" });
+  expect(status()).toBe("idle");
+});
+
 test("the hook script posts to the daemon from inside a pane", async () => {
   daemon.workspaces.createWorkspace({ cwd: home });
   const tabId = activeTab(daemon.workspaces.getState());

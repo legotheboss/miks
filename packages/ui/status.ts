@@ -20,8 +20,9 @@ export function workspaceTitle(workspace: Workspace): string {
 }
 
 export function tabTitle(tab: Tab): string {
-  // Claude Code prefixes its title with a spinner glyph; the dot shows that.
-  return tab.title.replace(/^[✳✶✻✽✢·⠀-⣿]\s*/u, "") || "Terminal";
+  // Claude Code prefixes its title with a status glyph (◐ ◑ while working,
+  // ✳ when idle), and other programs do similar; our dot already says it.
+  return tab.title.replace(/^\p{So}\s+/u, "") || "Terminal";
 }
 
 export const STATUS_LABELS: Record<AgentStatus, string> = {

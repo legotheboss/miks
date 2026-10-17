@@ -94,7 +94,10 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     workspace.tabIds.push(id);
     workspace.activeTabId = id;
 
-    pane.on("title", () => this.emit("change"));
+    pane.on("title", (title, previous) => {
+      this.applyTitle(id, title, previous);
+      this.emit("change");
+    });
     pane.on("exit", () => this.removeTab(id));
 
     this.emit("change");
@@ -147,8 +150,13 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
         break;
       case "Notification":
         // The idle reminder ("Claude is waiting for your input") arrives a
-        // minute after a turn ends, which `done` already covers.
-        if (payload?.notification_type === "idle_prompt") return;
+        // minute after a turn ends. `done` already covers a finished turn,
+        // but it also catches one that ended without saying so.
+        if (payload?.notification_type === "idle_prompt") {
+          if (this.agents.get(tabId)?.status !== "working") return;
+          set("idle");
+          break;
+        }
         set("waiting", payload?.message);
         break;
       case "Stop":
@@ -162,6 +170,21 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     }
 
     this.emit("change");
+  }
+
+  /**
+   * Claude Code animates its title (◐ ◑) while a turn runs and shows ✳ when
+   * it stops. Interrupting with Esc fires no hook at all, so the spinner
+   * stopping is how we hear about it: the turn is over, and since you ended
+   * it yourself there's nothing new to see. Only the change from spinning to
+   * ✳ counts, never a ✳ on its own, which can trail a prompt just submitted.
+   */
+  private applyTitle(tabId: string, title: string, previous: string) {
+    const agent = this.agents.get(tabId);
+    if (agent?.status !== "working") return;
+    if (!CLAUDE_IDLE_TITLE.test(title) || !CLAUDE_WORKING_TITLE.test(previous)) return;
+
+    this.agents.set(tabId, { ...agent, status: "idle", message: undefined, since: Date.now() });
   }
 
   /** Ends every pane. For tests; the real daemon just exits. */
@@ -212,6 +235,11 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     return this.workspaces.find((w) => w.id === workspaceId);
   }
 }
+
+// Claude Code's title glyphs: half circles while working (braille in older
+// versions), ✳ when idle.
+const CLAUDE_WORKING_TITLE = /^[◐◑◒◓\u2800-\u28ff]/u;
+const CLAUDE_IDLE_TITLE = /^✳/u;
 
 function shortId(): string {
   return randomUUID().slice(0, 8);

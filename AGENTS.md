@@ -28,8 +28,10 @@ so before doing it to the real one.
 
 - `yarn dev`: Vite with hot reload inside Electron. UI edits hot-reload,
   `packages/app` edits restart Electron, neither restarts the daemon. Daemon
-  code changes need the daemon restarted (`pkill -f "daemon/server/main.ts
-  serve"`; the app starts a fresh one on its next connect or reload).
+  code changes need the daemon restarted, which ends every terminal: Miks →
+  Restart daemon… in the app. The daemon names itself `miks-daemon`, so match
+  that, not its script path (`pkill -f main.ts` misses it); for a scratch one,
+  find it by its socket (`lsof -p <pid> | grep miks.sock`).
 - Experiment against a scratch daemon, never the real one:
   `MIKS_HOME=/tmp/mk yarn dev`. Keep `MIKS_HOME` short; macOS caps socket
   paths at 104 bytes.
@@ -90,6 +92,13 @@ resizes); keep it passing.
 `packages/daemon/hooks/claude-hook.sh` is a Claude Code hook for every event;
 it posts the hook JSON to `/api/hook?pane=$MIKS_PANE_ID` and is a no-op outside
 Miks. Mapping in `Workspaces.applyHook`.
+
+Interrupting a turn with Esc fires no hook. Claude Code's title does change:
+◐/◑ while a turn runs, ✳ when it stops (verified live), so the spinner
+stopping ends a `working` turn (`Workspaces.applyTitle`). Testing against a
+real `claude` in a pane: start it in a trusted folder or it stops at the trust
+prompt, and send a prompt's text and its Enter as separate writes, or Claude
+Code takes the Enter as part of a paste.
 
 # Style
 

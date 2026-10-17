@@ -49,7 +49,8 @@ const INHERITED_ENV_BLOCKLIST = [
  * host does it, so each query gets exactly one answer while a UI is attached.
  */
 export class Pane extends EventEmitter<{
-  title: [string];
+  /** The new title, then the one it replaced. */
+  title: [string, string];
   exit: [number];
 }> {
   readonly id: string;
@@ -92,8 +93,9 @@ export class Pane extends EventEmitter<{
     });
     this.terminal.loadAddon(this.serializer as any);
     this.terminal.onTitleChange((title) => {
+      const previous = this.title;
       this.title = title;
-      this.emit("title", title);
+      this.emit("title", title, previous);
     });
 
     this.pty = pty.spawn(file, args, {

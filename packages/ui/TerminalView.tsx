@@ -8,6 +8,7 @@ import { useMatchMedia } from "crosswing/hooks/useMatchMedia";
 import { DragEvent, HTMLAttributes, useEffect, useRef } from "react";
 import { styled } from "styled-components";
 import { daemon } from "./daemon";
+import { getFontSize, useFontSize } from "./fontSize";
 
 /**
  * One pane's terminal. Every tab's terminal stays mounted (stacked, with only
@@ -27,11 +28,12 @@ export function TerminalView({
   const activeRef = useRef(active);
   activeRef.current = active;
   const dark = useMatchMedia("(prefers-color-scheme: dark)");
+  const fontSize = useFontSize();
 
   useEffect(() => {
     const terminal = new Terminal({
       fontFamily: `"SF Mono", Menlo, Monaco, monospace`,
-      fontSize: 13,
+      fontSize: getFontSize(),
       lineHeight: 1.15,
       scrollback: 10_000,
       allowProposedApi: true,
@@ -102,6 +104,16 @@ export function TerminalView({
   useEffect(() => {
     if (viewRef.current) viewRef.current.terminal.options.theme = dark ? darkTheme : lightTheme;
   }, [dark]);
+
+  // A new font size changes how many cells fit, so the visible terminal
+  // refits (resizing its pane); hidden ones refit when they come on screen.
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || view.terminal.options.fontSize === fontSize) return;
+
+    view.terminal.options.fontSize = fontSize;
+    if (activeRef.current) view.fit.fit();
+  }, [fontSize]);
 
   // Coming on screen: switch to WebGL and fit to the area, which resizes the
   // pane only if the area actually changed while the tab was hidden.

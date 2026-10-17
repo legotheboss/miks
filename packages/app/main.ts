@@ -1,7 +1,8 @@
 import { spawn } from "child_process";
-import { app, BrowserWindow, ipcMain, Menu, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
 import type { MenuItemConstructorOptions, WebContents } from "electron";
 import fs from "fs";
+import http from "http";
 import path from "path";
 import { connectDaemon as openDaemonSocket } from "miks/shared/connect";
 import { logPath, miksHome, socketPath } from "miks/shared/paths";
@@ -76,8 +77,9 @@ function startDaemon() {
  */
 const links = new Map<WebContents, WebSocket>();
 
-ipcMain.on("miks:connect", async (event) => {
-  const contents = event.sender;
+ipcMain.on("miks:connect", (event) => linkWindow(event.sender));
+
+async function linkWindow(contents: WebContents) {
   links.get(contents)?.close();
   links.delete(contents);
 
@@ -102,11 +104,53 @@ ipcMain.on("miks:connect", async (event) => {
   });
 
   contents.send("miks:status", { connected: true });
-});
+}
 
 ipcMain.on("miks:send", (event, message: string) => {
   links.get(event.sender)?.send(message);
 });
+
+/** A GET against the daemon's HTTP API, or null if it isn't answering. */
+function daemonGet(apiPath: string): Promise<any> {
+  return new Promise((resolve) => {
+    const request = http.get({ socketPath: socketPath(), path: apiPath }, (response) => {
+      let body = "";
+      response.on("data", (chunk) => (body += chunk));
+      response.on("end", () => resolve(JSON.parse(body)));
+    });
+    request.on("error", () => resolve(null));
+  });
+}
+
+/**
+ * Stops the daemon, ending every terminal, and reconnects every window,
+ * which starts a fresh one. How new daemon code takes effect.
+ */
+async function restartDaemon(window: BrowserWindow | undefined) {
+  const [ping, state] = await Promise.all([daemonGet("/api/ping"), daemonGet("/api/state")]);
+  const tabs = (state?.workspaces ?? []).reduce((count: number, w: any) => count + w.tabs.length, 0);
+
+  const options = {
+    type: "warning" as const,
+    message: "Restart the daemon?",
+    detail: `This ends every terminal session${tabs ? ` (${tabs} open)` : ""}, including any agents running in them.`,
+    buttons: ["Restart", "Cancel"],
+    defaultId: 1,
+    cancelId: 1,
+  };
+  const { response } = window ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options);
+  if (response !== 0) return;
+
+  if (ping?.pid) {
+    process.kill(ping.pid, "SIGTERM");
+    // Wait for it to let go of the socket, so we don't reconnect to it.
+    for (let i = 0; i < 50 && (await daemonGet("/api/ping")); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+
+  for (const window of BrowserWindow.getAllWindows()) linkWindow(window.webContents);
+}
 
 //
 // The window.
@@ -165,7 +209,25 @@ function command(name: string, accelerator: string, label: string): MenuItemCons
 
 function buildMenu() {
   const template: MenuItemConstructorOptions[] = [
-    { role: "appMenu" },
+    {
+      role: "appMenu",
+      submenu: [
+        { role: "about" },
+        { type: "separator" },
+        {
+          label: "Restart daemon…",
+          click: (_item, window) => restartDaemon(window as BrowserWindow | undefined),
+        },
+        { type: "separator" },
+        { role: "services" },
+        { type: "separator" },
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
+        { role: "quit" },
+      ],
+    },
     {
       label: "File",
       submenu: [
@@ -180,6 +242,10 @@ function buildMenu() {
     {
       label: "View",
       submenu: [
+        command("fontBigger", "CmdOrCtrl+=", "Bigger text"),
+        command("fontSmaller", "CmdOrCtrl+-", "Smaller text"),
+        command("fontReset", "CmdOrCtrl+0", "Actual size"),
+        { type: "separator" },
         // Reloading the UI is free: the terminals live in the daemon.
         { role: "reload", label: "Reload UI" },
         { role: "toggleDevTools" },

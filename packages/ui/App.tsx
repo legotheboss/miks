@@ -4,6 +4,7 @@ import { DaemonState } from "miks/shared/protocol";
 import { useEffect } from "react";
 import { styled } from "styled-components";
 import { daemon, useDaemon } from "./daemon";
+import { DEFAULT_FONT_SIZE, getFontSize, setFontSize } from "./fontSize";
 import { Sidebar } from "./Sidebar";
 import { TabBar } from "./TabBar";
 import { TERMINAL_BACKGROUND, TerminalView } from "./TerminalView";
@@ -127,6 +128,15 @@ export const StyledApp = styled.div`
  * has to be resubscribed.
  */
 function runCommand(command: string) {
+  switch (command) {
+    case "fontBigger":
+      return setFontSize(getFontSize() + 1);
+    case "fontSmaller":
+      return setFontSize(getFontSize() - 1);
+    case "fontReset":
+      return setFontSize(DEFAULT_FONT_SIZE);
+  }
+
   const state = daemon.getSnapshot().state;
   if (!state) return;
 
