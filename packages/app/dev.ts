@@ -67,4 +67,13 @@ fs.watch(appDir, (_event, file) => {
   }, 200);
 });
 
+// Killing `yarn dev` takes its Electron with it, instead of leaving it open.
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+  process.on(signal, () => {
+    restarting = true;
+    electron?.kill();
+    server.close().finally(() => process.exit(0));
+  });
+}
+
 startElectron();
