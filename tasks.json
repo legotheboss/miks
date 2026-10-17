@@ -1,0 +1,9 @@
+{
+  "dev": {
+    "title": "Dev",
+    "description": "Electron with the UI's Vite server (hot reload); terminals live in the daemon, so restarting this is free",
+    "run": {
+      "script": "dev"
+    }
+  }
+}

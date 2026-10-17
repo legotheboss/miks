@@ -1,0 +1,15 @@
+{
+  // The Electron side runs straight from source too (Electron 44 bundles
+  // Node 24), so this only checks it.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "declarationMap": false,
+    "noEmit": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "types": ["node"]
+  },
+  "include": ["*.ts"],
+  "exclude": ["node_modules"]
+}

@@ -1,0 +1,23 @@
+{
+  "name": "miks",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The Miks daemon: owns every terminal so the UI can come and go.",
+  "author": "nfarina@gmail.com",
+  "scripts": {
+    "daemon": "node server/main.ts serve"
+  },
+  "dependencies": {
+    "@xterm/addon-serialize": "^0.14.0",
+    "@xterm/headless": "^6.0.0",
+    "node-pty": "^1.1.0",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.2"
+  },
+  "exports": {
+    "./shared/*": "./shared/*.ts"
+  }
+}

@@ -1,0 +1,10 @@
+// @chatwing
+{
+  // See http://go.microsoft.com/fwlink/?LinkId=827846
+  // for the documentation about the extensions.json format
+  "recommendations": [
+    "oxc.oxc-vscode",
+    "styled-components.vscode-styled-components",
+    "shadowtime2000.eta-vscode"
+  ]
+}

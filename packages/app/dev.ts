@@ -1,0 +1,57 @@
+// `yarn dev`: the UI's Vite server with hot reload, inside Electron. Edits to
+// the UI hot-reload in place; edits to the Electron side restart Electron.
+// Neither touches the daemon, so your terminals keep running throughout.
+import { ChildProcess, spawn } from "child_process";
+import fs from "fs";
+import path from "path";
+import { createServer } from "vite";
+
+const appDir = import.meta.dirname;
+const uiDir = path.resolve(appDir, "../ui");
+
+const server = await createServer({
+  root: uiDir,
+  configFile: path.join(uiDir, "vite.config.ts"),
+  server: { port: 2738, strictPort: true },
+});
+await server.listen();
+const url = server.resolvedUrls?.local[0];
+if (!url) throw new Error("Vite didn't report a URL.");
+server.printUrls();
+
+const DEVTOOLS_PORT = 2739;
+const electronBin = path.resolve(appDir, "../../node_modules/.bin/electron");
+let electron: ChildProcess | null = null;
+let restarting = false;
+
+function startElectron() {
+  // The DevTools port lets scripts/devtools.ts screenshot and inspect the
+  // window, which is how agents check their UI work. Dev only.
+  electron = spawn(electronBin, [`--remote-debugging-port=${DEVTOOLS_PORT}`, appDir], {
+    stdio: "inherit",
+    env: { ...process.env, MIKS_UI_URL: url },
+  });
+  electron.on("exit", () => {
+    if (restarting) return;
+    // Quitting the app ends `yarn dev` too.
+    server.close().finally(() => process.exit(0));
+  });
+}
+
+let timer: NodeJS.Timeout | null = null;
+for (const file of ["main.ts", "preload.cjs"]) {
+  fs.watch(path.join(appDir, file), () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      console.log(`${file} changed; restarting Electron.`);
+      restarting = true;
+      electron?.once("exit", () => {
+        restarting = false;
+        startElectron();
+      });
+      electron?.kill();
+    }, 200);
+  });
+}
+
+startElectron();

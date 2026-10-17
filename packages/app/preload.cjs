@@ -1,0 +1,18 @@
+// The renderer's only door to the daemon, exposed as `window.miks` (typed in
+// packages/ui/bridge.ts). CommonJS because sandboxed preloads can't be ESM.
+const { contextBridge, ipcRenderer } = require("electron");
+
+contextBridge.exposeInMainWorld("miks", {
+  /** (Re)connects this page to the daemon; status arrives via onStatus. */
+  connect: () => ipcRenderer.send("miks:connect"),
+  send: (message) => ipcRenderer.send("miks:send", message),
+  onMessage: (listener) => subscribe("miks:message", listener),
+  onStatus: (listener) => subscribe("miks:status", listener),
+  onCommand: (listener) => subscribe("miks:command", listener),
+});
+
+function subscribe(channel, listener) {
+  const handler = (_event, value) => listener(value);
+  ipcRenderer.on(channel, handler);
+  return () => ipcRenderer.removeListener(channel, handler);
+}

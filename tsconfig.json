@@ -1,0 +1,65 @@
+{
+  "compilerOptions": {
+    // Don't actually output code to the filesystem, just typecheck it.
+    "noEmit": true,
+    // Assume all ESNext features are available at runtime.
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    // Leave "import" statements alone since we are using ESM.
+    "module": "esnext",
+    // Do as little "transformation" as possible.
+    "target": "esnext",
+    // Include experimental React types.
+    "types": ["react/experimental", "vite/client", "node"],
+    // Allow importing CJS modules written as ESM modules without the
+    // "double default" problem. https://github.com/microsoft/TypeScript/issues/50058#issuecomment-1404411380
+    // This assumes TSC never emits JS code that is run "raw" by Node, which is
+    // true for our project: our code is only ever run through Vite or Rollup.
+    // Further reading here: https://stackoverflow.com/a/71473145/66673
+    "moduleResolution": "bundler",
+    // Assume all files are ESM modules.
+    "moduleDetection": "force",
+    // This is a composite project.
+    "composite": true,
+    // Recommended for composite projects. https://www.typescriptlang.org/tsconfig/#declarationMap
+    "declarationMap": true,
+    // Now that we're on Node 24, we can just import .ts files normally.
+    "allowImportingTsExtensions": true,
+    // Force tsc to rely on the references to resolve imports via our .d.ts files.
+    "disableSourceOfProjectReferenceRedirect": true,
+    // Enable strictest settings like strictNullChecks & noImplicitAny.
+    "strict": true,
+    // Speed up compilation by assuming .d.ts files are valid.
+    "skipLibCheck": true,
+    // Allow JSX syntax.
+    "jsx": "react-jsx",
+    // Prevent dumb casing mistakes.
+    "forceConsistentCasingInFileNames": true,
+    // Import non-ES modules as default imports.
+    "esModuleInterop": true,
+    // Allow importing JSON files.
+    "resolveJsonModule": true,
+    // Allow importing non-TS files as "any".
+    "noImplicitAny": false,
+    // Generate source maps.
+    "sourceMap": true
+  },
+  "include": [
+    "packages/crosswing/**/*.ts",
+    "packages/crosswing/**/*.tsx",
+    "packages/crosswing/**/*.json",
+    "packages/ui/**/*.ts",
+    "packages/ui/**/*.tsx",
+    "packages/ui/**/*.json",
+    "*.ts"
+  ],
+  // The wings-synced crosswing tree carries stories and tests we don't run here.
+  "exclude": [
+    "packages/crosswing/**/*.stories.tsx",
+    "packages/crosswing/**/*.test.ts",
+    "packages/crosswing/**/*.test.tsx",
+    "packages/crosswing/gen/**",
+    "packages/crosswing/storybook.tsx",
+    "packages/crosswing/modals/storybook/**",
+    "packages/crosswing/router/storybook/**"
+  ]
+}

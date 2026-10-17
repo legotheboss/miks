@@ -1,0 +1,39 @@
+import { colors } from "crosswing/colors";
+import { AgentStatus, Tab, Workspace } from "miks/shared/protocol";
+
+/** Most urgent first: what a workspace shows when its tabs disagree. */
+const URGENCY: AgentStatus[] = ["waiting", "done", "working", "idle"];
+
+export function workspaceStatus(workspace: Workspace): AgentStatus | null {
+  const statuses = workspace.tabs.map((tab) => tab.agent?.status).filter(Boolean) as AgentStatus[];
+  return URGENCY.find((status) => statuses.includes(status)) ?? null;
+}
+
+/** The waiting agent's own explanation, if it gave one. */
+export function waitingMessage(workspace: Workspace): string | null {
+  return workspace.tabs.find((tab) => tab.agent?.status === "waiting")?.agent?.message ?? null;
+}
+
+export function workspaceTitle(workspace: Workspace): string {
+  const activeTab = workspace.tabs.find((tab) => tab.id === workspace.activeTabId);
+  return workspace.title ?? (activeTab ? tabTitle(activeTab) : "Workspace");
+}
+
+export function tabTitle(tab: Tab): string {
+  // Claude Code prefixes its title with a spinner glyph; the dot shows that.
+  return tab.title.replace(/^[✳✶✻✽✢·⠀-⣿]\s*/u, "") || "Terminal";
+}
+
+export const STATUS_LABELS: Record<AgentStatus, string> = {
+  waiting: "Needs you",
+  done: "Done",
+  working: "Working",
+  idle: "Idle",
+};
+
+export const statusColors: Record<AgentStatus, string> = {
+  waiting: colors.orange(),
+  done: colors.green(),
+  working: colors.blue(),
+  idle: colors.mediumGray(),
+};

@@ -1,0 +1,32 @@
+// @chatwing
+{
+  // Use our local version of TypeScript.
+  "typescript.tsdk": "node_modules/typescript/lib",
+
+  "[javascript]": {
+    "editor.codeActionsOnSave": ["source.organizeImports"]
+  },
+  "[typescript]": {
+    "editor.codeActionsOnSave": ["source.organizeImports"]
+  },
+  "[typescriptreact]": {
+    "editor.codeActionsOnSave": ["source.organizeImports"]
+  },
+  "task.allowAutomaticTasks": "on",
+  // Enable file nesting.
+  "explorer.fileNesting.enabled": true,
+  // Customize file nesting patterns.
+  "explorer.fileNesting.patterns": {
+    "*.ts": "${capture}.js, ${capture}.js.map, ${capture}.ts.map, ${capture}.test.js, ${capture}.test.ts, ${capture}.test.ts.snap, ${capture}.stories.tsx, ${capture}.html, ${capture}.*.html, ${capture}.*.md, ${capture}.*.json",
+    "*.tsx": "${capture}.js, ${capture}.js.map, ${capture}.ts.map, ${capture}.stories.js.map, ${capture}.stories.js, ${capture}.test.ts, ${capture}.stories.tsx, ${capture}.*.html, ${capture}.*.md, ${capture}.*.json",
+    "*.svg": "${capture}.tsx, ${capture}.ts",
+    "*.png": "${capture}.ts",
+    "*.jpg": "${capture}.ts"
+  },
+  // Customize icons when using the "Material Icon Theme".
+  "material-icon-theme.folders.associations": {
+    "src": "src",
+    "node_modules": "node",
+    ".vscode": "vscode"
+  }
+}

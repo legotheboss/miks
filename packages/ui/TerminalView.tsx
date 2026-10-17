@@ -1,0 +1,204 @@
+import { FitAddon } from "@xterm/addon-fit";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
+import { WebLinksAddon } from "@xterm/addon-web-links";
+import { WebglAddon } from "@xterm/addon-webgl";
+import { ITheme, Terminal } from "@xterm/xterm";
+import "@xterm/xterm/css/xterm.css";
+import { useMatchMedia } from "crosswing/hooks/useMatchMedia";
+import { HTMLAttributes, useEffect, useRef } from "react";
+import { styled } from "styled-components";
+import { daemon } from "./daemon";
+
+/**
+ * One pane's terminal. Every tab's terminal stays mounted (stacked, with only
+ * the active one visible) so each keeps its size, scrollback, and stream; the
+ * daemon owns the real state, so this is a view that can be rebuilt anytime.
+ */
+export function TerminalView({
+  tabId,
+  active,
+  ...rest
+}: HTMLAttributes<HTMLDivElement> & {
+  tabId: string;
+  active: boolean;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const viewRef = useRef<{ terminal: Terminal; fit: FitAddon } | null>(null);
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const dark = useMatchMedia("(prefers-color-scheme: dark)");
+
+  useEffect(() => {
+    const terminal = new Terminal({
+      fontFamily: `"SF Mono", Menlo, Monaco, monospace`,
+      fontSize: 13,
+      lineHeight: 1.15,
+      scrollback: 10_000,
+      allowProposedApi: true,
+      macOptionClickForcesSelection: true,
+      theme: dark ? darkTheme : lightTheme,
+    });
+    const fit = new FitAddon();
+    viewRef.current = { terminal, fit };
+
+    terminal.loadAddon(fit);
+    terminal.loadAddon(new Unicode11Addon());
+    terminal.unicode.activeVersion = "11";
+    // window.open is routed to the real browser by the app.
+    terminal.loadAddon(new WebLinksAddon((_event, uri) => window.open(uri)));
+    terminal.open(containerRef.current!);
+
+    const unstream = daemon.stream(tabId, (event) => {
+      if (event.type === "snapshot") {
+        terminal.reset();
+        // A tab that isn't on screen takes the pane's size as it is.
+        if (event.cols !== terminal.cols || event.rows !== terminal.rows) {
+          terminal.resize(event.cols, event.rows);
+        }
+      }
+      terminal.write(event.data);
+    });
+
+    // Only the tab on screen decides its pane's size, and only once its
+    // renderer is in place: the WebGL and DOM renderers measure characters
+    // differently, and every size change is a SIGWINCH that makes full-screen
+    // programs redraw.
+    const attach = () => {
+      if (activeRef.current) daemon.send({ type: "attach", tabId, cols: terminal.cols, rows: terminal.rows });
+      else daemon.send({ type: "attach", tabId });
+    };
+    const unconnect = daemon.onConnect(attach);
+
+    const input = terminal.onData((data) => daemon.send({ type: "input", tabId, data }));
+    const binary = terminal.onBinary((data) => daemon.send({ type: "input", tabId, data }));
+
+    if (activeRef.current) prepareActive(terminal, fit);
+    if (daemon.connected) attach();
+
+    // Adopting the pane's size from a snapshot echoes it back here too, which
+    // the daemon ignores since nothing changed.
+    const resize = terminal.onResize(({ cols, rows }) => daemon.send({ type: "resize", tabId, cols, rows }));
+
+    const observer = new ResizeObserver(() => {
+      if (activeRef.current) fit.fit();
+    });
+    observer.observe(containerRef.current!);
+
+    return () => {
+      observer.disconnect();
+      input.dispose();
+      binary.dispose();
+      resize.dispose();
+      unconnect();
+      unstream();
+      daemon.send({ type: "detach", tabId });
+      webglAddons.get(terminal)?.dispose();
+      terminal.dispose();
+      viewRef.current = null;
+    };
+    // The theme is applied below, without rebuilding the terminal.
+  }, [tabId]);
+
+  useEffect(() => {
+    if (viewRef.current) viewRef.current.terminal.options.theme = dark ? darkTheme : lightTheme;
+  }, [dark]);
+
+  // Coming on screen: switch to WebGL and fit to the area, which resizes the
+  // pane only if the area actually changed while the tab was hidden.
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!active || !view) return;
+
+    prepareActive(view.terminal, view.fit);
+    view.terminal.focus();
+
+    return () => {
+      webglAddons.get(view.terminal)?.dispose();
+      webglAddons.delete(view.terminal);
+    };
+  }, [active]);
+
+  return <StyledTerminalView ref={containerRef} data-active={active} {...rest} />;
+}
+
+/**
+ * Only the visible terminal gets a WebGL renderer: Chromium caps how many
+ * WebGL contexts a page can have, and hidden terminals don't need one.
+ */
+const webglAddons = new WeakMap<Terminal, WebglAddon>();
+
+function prepareActive(terminal: Terminal, fit: FitAddon) {
+  if (!webglAddons.has(terminal)) {
+    const webgl = new WebglAddon();
+    webgl.onContextLoss(() => {
+      webgl.dispose();
+      webglAddons.delete(terminal);
+    });
+    terminal.loadAddon(webgl);
+    webglAddons.set(terminal, webgl);
+  }
+
+  fit.fit();
+}
+
+export const StyledTerminalView = styled.div`
+  position: absolute;
+  inset: 8px 0 0 10px;
+  visibility: hidden;
+
+  &[data-active="true"] {
+    visibility: visible;
+  }
+`;
+
+//
+// Themes, after VS Code's default dark and light terminal colors.
+//
+
+export const TERMINAL_BACKGROUND = { dark: "#1a1b1e", light: "#ffffff" };
+
+const darkTheme: ITheme = {
+  background: TERMINAL_BACKGROUND.dark,
+  foreground: "#cccccc",
+  cursor: "#cccccc",
+  selectionBackground: "#264f78",
+  black: "#000000",
+  red: "#cd3131",
+  green: "#0dbc79",
+  yellow: "#e5e510",
+  blue: "#2472c8",
+  magenta: "#bc3fbc",
+  cyan: "#11a8cd",
+  white: "#e5e5e5",
+  brightBlack: "#666666",
+  brightRed: "#f14c4c",
+  brightGreen: "#23d18b",
+  brightYellow: "#f5f543",
+  brightBlue: "#3b8eea",
+  brightMagenta: "#d670d6",
+  brightCyan: "#29b8db",
+  brightWhite: "#e5e5e5",
+};
+
+const lightTheme: ITheme = {
+  background: TERMINAL_BACKGROUND.light,
+  foreground: "#333333",
+  cursor: "#333333",
+  selectionBackground: "#add6ff",
+  black: "#000000",
+  red: "#cd3131",
+  green: "#107c10",
+  yellow: "#949800",
+  blue: "#0451a5",
+  magenta: "#bc05bc",
+  cyan: "#0598bc",
+  white: "#555555",
+  brightBlack: "#666666",
+  brightRed: "#cd3131",
+  brightGreen: "#14ce14",
+  brightYellow: "#b5ba00",
+  brightBlue: "#0451a5",
+  brightMagenta: "#bc05bc",
+  brightCyan: "#0598bc",
+  brightWhite: "#a5a5a5",
+};

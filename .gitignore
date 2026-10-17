@@ -1,0 +1,125 @@
+# @chatwing
+
+## Mac
+
+.DS_Store
+
+## Xcode
+xcuserdata/
+
+## Android Studio
+*.iml
+.gradle
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+/.idea/deploymentTargetDropDown.xml
+build/
+release/
+captures/
+.externalNativeBuild
+.cxx
+
+## Yarn
+
+node_modules
+.yarn/
+
+## Submodule contents (for ignoring in VSCode search results)
+
+submodules/**
+
+## TypeScript
+
+*.tsbuildinfo
+
+## Firebase
+
+.firebase/
+*-debug.log
+
+## Firebase Secrets for Local Development
+
+packages/cloud/secrets.env
+packages/cloud/secrets.json
+
+## Google Service Account Credentials (includes private key)
+
+packages/cloud/google.json
+
+## Local fixtures
+
+packages/cloud/emulator-data/
+
+## Test Coverage
+
+.coverage
+
+## Storybook / Chromatic
+
+storybook-static/
+build-storybook.log
+chromatic.log
+chromatic-diagnostics.json
+
+## Build Products
+
+**/lib/
+**/dist/
+**/local/
+
+## Wrangler
+
+**/.wrangler
+
+## Agent worker — local SDK session state (HOME + cwd) for the cloud
+## emulator path. Persists across reboots so chat history survives, but is
+## per-developer.
+
+packages/workers/agent/agent-data/
+
+## Agent worker — staged cloud bundle from `agent:stage`. Generated.
+
+packages/workers/agent/build/
+
+## Claude
+
+.claude/settings.local.json
+.claude/worktrees/
+
+## Secrets
+
+.email-me-key
+
+## MCP CLI — the admin user the `script mcp` bridge acts as (per-developer).
+
+.mcp_user
+
+## Support monitor cursor — last-seen support message timestamp (per-checkout).
+
+.support_cursor
+
+## Personal working notes an agent keeps about the person whose data it's
+## working on, in whichever project. Private per checkout and never committed:
+## these repos shouldn't carry one person's notes around, and in sage the file
+## holds a production API token. One per checkout — a second learner gets their
+## own clone rather than a second file here.
+
+USER.md
+
+## Anything this project alone needs ignored. Everything above is shared, so
+## an entry added there quietly ignores the same path in every Chatwing
+## project — which is how a recipe app ended up ignoring a Japanese learner's
+## notes, and a language app ended up ignoring a video-eval corpus it has no
+## concept of.
+
+# @chatwing:projectIgnores:start
+
+## Miks runtime state when MIKS_HOME points inside the repo (tests, dev).
+
+.miks/
+
+# @chatwing:projectIgnores:end

@@ -1,0 +1,167 @@
+import { SerializeAddon } from "@xterm/addon-serialize";
+import headless from "@xterm/headless";
+import { EventEmitter } from "events";
+import * as pty from "node-pty";
+import path from "path";
+
+const { Terminal } = headless;
+
+const SCROLLBACK = 10_000;
+
+/** Someone watching a pane: in practice, one UI connection. */
+export type PaneViewer = {
+  /** The screen as VT sequences, at the pane's size. */
+  snapshot(data: string, cols: number, rows: number): void;
+  output(data: string): void;
+};
+
+/**
+ * Variables we must not pass down from whatever launched the daemon. When the
+ * UI is started from inside another terminal (cmux, Ghostty, Claude Code
+ * itself), these would make programs in our panes think they're running
+ * there instead: cmux's hooks would report to cmux, and `claude` would refuse
+ * to start inside "another" Claude Code session.
+ */
+const INHERITED_ENV_BLOCKLIST = [/^CMUX_/, /^GHOSTTY_/, /^TERM_PROGRAM/, /^CLAUDECODE$/, /^CLAUDE_CODE_ENTRYPOINT$/];
+
+/**
+ * One shell in a PTY, plus a headless terminal emulator that sees every byte
+ * it prints. The emulator is what makes reattaching work: a new viewer gets
+ * the emulator's current screen serialized as VT sequences, then the live
+ * stream from exactly that point on.
+ *
+ * Only viewers answer terminal queries (cursor position, device attributes):
+ * the headless emulator's replies are dropped, the same way VS Code's pty
+ * host does it, so each query gets exactly one answer while a UI is attached.
+ */
+export class Pane extends EventEmitter<{
+  title: [string];
+  exit: [number];
+}> {
+  readonly id: string;
+  title: string;
+
+  private readonly pty: pty.IPty;
+  private readonly terminal: InstanceType<typeof Terminal>;
+  private readonly serializer = new SerializeAddon();
+  private readonly viewers = new Set<PaneViewer>();
+  /** Viewers whose snapshot is being taken, and the output they'll need after it. */
+  private readonly attaching = new Map<PaneViewer, string[]>();
+
+  constructor({
+    id,
+    cwd,
+    env,
+    command = [process.env.SHELL || "/bin/zsh", "-l"],
+    cols = 80,
+    rows = 24,
+  }: {
+    id: string;
+    cwd: string;
+    env: Record<string, string>;
+    /** What to run; a login shell unless told otherwise (tests are). */
+    command?: string[];
+    cols?: number;
+    rows?: number;
+  }) {
+    super();
+    this.id = id;
+
+    const [file, ...args] = command;
+    this.title = path.basename(file);
+
+    this.terminal = new Terminal({
+      cols,
+      rows,
+      scrollback: SCROLLBACK,
+      allowProposedApi: true,
+    });
+    this.terminal.loadAddon(this.serializer as any);
+    this.terminal.onTitleChange((title) => {
+      this.title = title;
+      this.emit("title", title);
+    });
+
+    this.pty = pty.spawn(file, args, {
+      name: "xterm-256color",
+      cols,
+      rows,
+      cwd,
+      env: { ...paneEnv(), ...env },
+    });
+
+    this.pty.onData((data) => {
+      this.terminal.write(data);
+      for (const viewer of this.viewers) viewer.output(data);
+      for (const pending of this.attaching.values()) pending.push(data);
+    });
+
+    this.pty.onExit(({ exitCode }) => {
+      this.viewers.clear();
+      this.attaching.clear();
+      this.terminal.dispose();
+      this.emit("exit", exitCode);
+    });
+  }
+
+  /** Without a size, the pane keeps its own and the viewer adopts it. */
+  attach(viewer: PaneViewer, size?: { cols: number; rows: number }) {
+    this.detach(viewer);
+    if (size) this.resize(size.cols, size.rows);
+
+    // The emulator parses writes asynchronously, so the snapshot has to wait
+    // until it has caught up with everything written so far. An empty write's
+    // callback fires right after the bytes queued ahead of it are parsed.
+    // Anything the PTY prints in the meantime is held for this viewer, since
+    // it'll be missing from the snapshot.
+    this.attaching.set(viewer, []);
+    this.terminal.write("", () => {
+      const pending = this.attaching.get(viewer);
+      if (!pending) return; // Detached (or exited) while we waited.
+
+      this.attaching.delete(viewer);
+      viewer.snapshot(this.serializer.serialize({ scrollback: SCROLLBACK }), this.terminal.cols, this.terminal.rows);
+      for (const data of pending) viewer.output(data);
+      this.viewers.add(viewer);
+    });
+  }
+
+  detach(viewer: PaneViewer) {
+    this.viewers.delete(viewer);
+    this.attaching.delete(viewer);
+  }
+
+  write(data: string) {
+    this.pty.write(data);
+  }
+
+  resize(cols: number, rows: number) {
+    cols = Math.max(2, Math.floor(cols));
+    rows = Math.max(1, Math.floor(rows));
+    if (cols === this.terminal.cols && rows === this.terminal.rows) return;
+
+    this.terminal.resize(cols, rows);
+    this.pty.resize(cols, rows);
+  }
+
+  kill() {
+    this.pty.kill("SIGHUP");
+  }
+}
+
+function paneEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value === undefined) continue;
+    if (INHERITED_ENV_BLOCKLIST.some((pattern) => pattern.test(key))) continue;
+    env[key] = value;
+  }
+
+  return {
+    ...env,
+    TERM: "xterm-256color",
+    COLORTERM: "truecolor",
+    TERM_PROGRAM: "Miks",
+  };
+}

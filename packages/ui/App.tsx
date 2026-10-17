@@ -1,0 +1,196 @@
+import { colors } from "crosswing/colors";
+import { fonts } from "crosswing/fonts";
+import { DaemonState } from "miks/shared/protocol";
+import { useEffect } from "react";
+import { styled } from "styled-components";
+import { daemon, useDaemon } from "./daemon";
+import { Sidebar } from "./Sidebar";
+import { TabBar } from "./TabBar";
+import { TERMINAL_BACKGROUND, TerminalView } from "./TerminalView";
+
+export function App() {
+  const { state, connected, error } = useDaemon();
+
+  useEffect(() => daemon.onCommand(runCommand), []);
+  useSeenTracking(state);
+
+  if (!connected || !state) {
+    return (
+      <StyledApp>
+        <div className="message">
+          <div className="titlebar" />
+          <p>{error ?? "Connecting to the daemon…"}</p>
+          {error && <button onClick={() => daemon.reconnect()}>Start the daemon</button>}
+        </div>
+      </StyledApp>
+    );
+  }
+
+  const activeWorkspace = state.workspaces.find((w) => w.id === state.activeWorkspaceId) ?? null;
+
+  return (
+    <StyledApp>
+      <Sidebar className="sidebar" workspaces={state.workspaces} activeWorkspaceId={state.activeWorkspaceId} />
+      <div className="main">
+        {activeWorkspace ? <TabBar workspace={activeWorkspace} /> : <div className="empty-bar" />}
+        <div className="terminals">
+          {/* Every tab's terminal stays mounted, so switching is instant. */}
+          {state.workspaces.flatMap((workspace) =>
+            workspace.tabs.map((tab) => (
+              <TerminalView
+                key={tab.id}
+                tabId={tab.id}
+                active={workspace.id === state.activeWorkspaceId && tab.id === workspace.activeTabId}
+              />
+            )),
+          )}
+          {!activeWorkspace && (
+            <div className="empty">
+              <button onClick={() => daemon.send({ type: "createWorkspace" })}>New workspace</button>
+            </div>
+          )}
+        </div>
+      </div>
+    </StyledApp>
+  );
+}
+
+export const StyledApp = styled.div`
+  position: fixed;
+  inset: 0;
+  display: flex;
+  background: ${colors.textBackground()};
+  color: ${colors.text()};
+  font: ${fonts.display({ size: 13 })};
+
+  > .sidebar {
+    width: 230px;
+    flex-shrink: 0;
+  }
+
+  > .main {
+    flex-grow: 1;
+    min-width: 0;
+    display: flex;
+    flex-flow: column;
+
+    > .empty-bar {
+      height: 38px;
+      -webkit-app-region: drag;
+    }
+
+    > .terminals {
+      flex-grow: 1;
+      position: relative;
+      overflow: hidden;
+      /* Matches the terminal themes, so the padding around them blends in. */
+      background: ${TERMINAL_BACKGROUND.light};
+
+      @media (prefers-color-scheme: dark) {
+        background: ${TERMINAL_BACKGROUND.dark};
+      }
+
+      > .empty {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+    }
+  }
+
+  > .message {
+    flex-grow: 1;
+    display: flex;
+    flex-flow: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: ${colors.textSecondary()};
+
+    > .titlebar {
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 44px;
+      -webkit-app-region: drag;
+    }
+  }
+
+  button {
+    font: inherit;
+  }
+`;
+
+/**
+ * Menu commands. They read the state fresh each time, so the handler never
+ * has to be resubscribed.
+ */
+function runCommand(command: string) {
+  const state = daemon.getSnapshot().state;
+  if (!state) return;
+
+  const workspaces = state.workspaces;
+  const workspace = workspaces.find((w) => w.id === state.activeWorkspaceId);
+  const tabs = workspace?.tabs ?? [];
+  const tabIndex = tabs.findIndex((tab) => tab.id === workspace?.activeTabId);
+  const workspaceIndex = workspaces.findIndex((w) => w.id === workspace?.id);
+
+  const selectTab = (offset: number) => {
+    if (!workspace || tabs.length === 0) return;
+    const tab = tabs[(tabIndex + offset + tabs.length) % tabs.length];
+    daemon.send({ type: "select", workspaceId: workspace.id, tabId: tab.id });
+  };
+
+  const selectWorkspace = (index: number) => {
+    const target = workspaces[index];
+    if (target) daemon.send({ type: "select", workspaceId: target.id });
+  };
+
+  switch (command) {
+    case "newTab":
+      if (workspace) daemon.send({ type: "createTab", workspaceId: workspace.id });
+      else daemon.send({ type: "createWorkspace" });
+      return;
+    case "newWorkspace":
+      return daemon.send({ type: "createWorkspace" });
+    case "closeTab":
+      if (workspace?.activeTabId) daemon.send({ type: "closeTab", tabId: workspace.activeTabId });
+      return;
+    case "closeWorkspace":
+      if (workspace) daemon.send({ type: "closeWorkspace", workspaceId: workspace.id });
+      return;
+    case "nextTab":
+      return selectTab(1);
+    case "previousTab":
+      return selectTab(-1);
+    case "nextWorkspace":
+      return selectWorkspace((workspaceIndex + 1) % workspaces.length);
+    case "previousWorkspace":
+      return selectWorkspace((workspaceIndex - 1 + workspaces.length) % workspaces.length);
+  }
+
+  const number = command.match(/^workspace(\d)$/)?.[1];
+  if (number) selectWorkspace(Number(number) - 1);
+}
+
+/**
+ * An agent's `done` means "finished, and you haven't looked yet". Selecting
+ * the tab clears it in the daemon; this covers the other way of looking: the
+ * tab was already on screen, in a focused window, when the agent finished.
+ */
+function useSeenTracking(state: DaemonState | null) {
+  const workspace = state?.workspaces.find((w) => w.id === state.activeWorkspaceId);
+  const tab = workspace?.tabs.find((t) => t.id === workspace.activeTabId);
+  const doneTabId = tab?.agent?.status === "done" ? tab.id : null;
+
+  useEffect(() => {
+    if (!doneTabId) return;
+
+    const markSeen = () => daemon.send({ type: "seen", tabId: doneTabId });
+    if (document.hasFocus()) markSeen();
+
+    window.addEventListener("focus", markSeen);
+    return () => window.removeEventListener("focus", markSeen);
+  }, [doneTabId]);
+}

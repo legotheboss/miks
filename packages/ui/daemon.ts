@@ -1,0 +1,135 @@
+// The UI's view of the daemon, through the bridge the Electron preload
+// exposes as `window.miks` (packages/app/preload.cjs). There's one
+// connection per page; components read state with `useDaemon` and terminals
+// subscribe to their pane's stream with `daemon.stream`.
+import { ClientMessage, DaemonMessage, DaemonState } from "miks/shared/protocol";
+import { useSyncExternalStore } from "react";
+
+type Unsubscribe = () => void;
+
+type MiksBridge = {
+  connect(): void;
+  send(message: string): void;
+  onMessage(listener: (message: string) => void): Unsubscribe;
+  onStatus(listener: (status: { connected: boolean; error?: string }) => void): Unsubscribe;
+  onCommand(listener: (command: string) => void): Unsubscribe;
+};
+
+declare global {
+  interface Window {
+    miks?: MiksBridge;
+  }
+}
+
+export type DaemonSnapshot = {
+  state: DaemonState | null;
+  connected: boolean;
+  error: string | null;
+};
+
+export type PaneStreamEvent =
+  | { type: "snapshot"; data: string; cols: number; rows: number }
+  | { type: "output"; data: string };
+
+class DaemonClient {
+  private snapshot: DaemonSnapshot = { state: null, connected: false, error: null };
+  private readonly listeners = new Set<() => void>();
+  private readonly streams = new Map<string, (event: PaneStreamEvent) => void>();
+  private readonly connectListeners = new Set<() => void>();
+  private readonly commandListeners = new Set<(command: string) => void>();
+  private readonly bridge: MiksBridge | undefined = window.miks;
+
+  constructor() {
+    if (!this.bridge) {
+      this.update({ error: "Miks has to run inside its app (yarn dev), which connects it to the daemon." });
+      return;
+    }
+
+    this.bridge.onStatus(({ connected, error }) => {
+      if (!connected) {
+        this.update({ connected, error: error ?? "The daemon stopped, taking its terminals with it." });
+        return;
+      }
+
+      this.update({ connected, error: null });
+
+      this.send({ type: "hello" });
+      for (const listener of this.connectListeners) listener();
+    });
+
+    this.bridge.onMessage((raw) => this.receive(JSON.parse(raw)));
+    this.bridge.onCommand((command) => {
+      for (const listener of this.commandListeners) listener(command);
+    });
+
+    this.bridge.connect();
+  }
+
+  /** Reconnects, starting the daemon again if it's gone. */
+  reconnect() {
+    this.update({ error: null });
+    this.bridge?.connect();
+  }
+
+  send(message: ClientMessage) {
+    if (this.snapshot.connected) this.bridge?.send(JSON.stringify(message));
+  }
+
+  /** Routes one pane's snapshot and output to its terminal. */
+  stream(tabId: string, handler: (event: PaneStreamEvent) => void): Unsubscribe {
+    this.streams.set(tabId, handler);
+    return () => {
+      if (this.streams.get(tabId) === handler) this.streams.delete(tabId);
+    };
+  }
+
+  /** Called on every (re)connection, which is when terminals must attach. */
+  onConnect(listener: () => void): Unsubscribe {
+    this.connectListeners.add(listener);
+    return () => this.connectListeners.delete(listener);
+  }
+
+  /** Menu commands from the app (⌘T and friends). */
+  onCommand(listener: (command: string) => void): Unsubscribe {
+    this.commandListeners.add(listener);
+    return () => this.commandListeners.delete(listener);
+  }
+
+  get connected(): boolean {
+    return this.snapshot.connected;
+  }
+
+  //
+  // useSyncExternalStore plumbing.
+  //
+
+  subscribe = (listener: () => void): Unsubscribe => {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  };
+
+  getSnapshot = (): DaemonSnapshot => this.snapshot;
+
+  private update(changes: Partial<DaemonSnapshot>) {
+    this.snapshot = { ...this.snapshot, ...changes };
+    for (const listener of this.listeners) listener();
+  }
+
+  private receive(message: DaemonMessage) {
+    switch (message.type) {
+      case "state":
+        return this.update({ state: message.state });
+      case "snapshot":
+      case "output": {
+        const { tabId, ...event } = message;
+        return this.streams.get(tabId)?.(event);
+      }
+    }
+  }
+}
+
+export const daemon = new DaemonClient();
+
+export function useDaemon(): DaemonSnapshot {
+  return useSyncExternalStore(daemon.subscribe, daemon.getSnapshot);
+}

@@ -1,0 +1,60 @@
+{
+  "//": [
+    "React and vite libs are pinned to keep one version across workspaces.",
+    "The debug package is pinned to prevent a million different versions getting installed.",
+    "eslint-plugin-react-hooks is pinned to the canary because the released version lacks the rules .oxlintrc.json enables (automatic-effect-dependencies, fire).",
+    "styled-components is pinned because 6.5.0 changed styled() prop filtering and breaks anchor-prop passthrough.",
+    "node-pty and electron need install steps despite the global enableScripts: false; scripts/postinstall.ts does them explicitly."
+  ],
+  "name": "miks-repo",
+  "type": "module",
+  "version": "0.0.0",
+  "packageManager": "yarn@4.18.1",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/postinstall.ts",
+    "test": "npm run tsc && npm run lint && npm run vitest",
+    "vitest": "vitest --run --project unit",
+    "vitest:unit": "vitest --run --project unit",
+    "lint": "oxlint",
+    "tsc": "tsc && tsc -p packages/daemon && tsc -p packages/app",
+    "clean:node_modules": "rm -rf node_modules packages/*/node_modules",
+    "clean:tsc": "find . -type f -name 'tsconfig.tsbuildinfo' ! -path '*/node_modules/*' -exec rm {} +",
+    "dev": "yarn workspace app dev",
+    "daemon": "yarn workspace miks daemon",
+    "build": "yarn workspace ui build",
+    "start": "yarn workspace app start",
+    "build:linters": "tsc -p .eslint/tsconfig.json"
+  },
+  "devDependencies": {
+    "@rolldown/plugin-babel": "^0.2.4",
+    "@types/debug": "^4.1.13",
+    "@types/node": "^26.6.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/react-is": "^19.3.0",
+    "@types/ws": "^8.18.2",
+    "@vitejs/plugin-react": "^6.1.2",
+    "babel-plugin-react-compiler": "^1.0.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "oxlint": "1.76.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "styled-components": "^6.5.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "8.2.0",
+    "vitest": "5.0.1",
+    "ws": "^8.22.0"
+  },
+  "resolutions": {
+    "debug": "4.4.3",
+    "eslint-plugin-react-hooks": "7.1.0-canary-2ba30655-20260219",
+    "react": "19.3.0-canary-d5736f09-20260507",
+    "react-dom": "19.3.0-canary-d5736f09-20260507",
+    "react-is": "19.3.0-canary-d5736f09-20260507",
+    "styled-components": "6.4.4"
+  }
+}

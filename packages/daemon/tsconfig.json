@@ -1,0 +1,15 @@
+{
+  // The daemon runs straight from source on Node 24 (type stripping), so it
+  // only needs checking, with Node's types instead of the DOM's.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "declarationMap": false,
+    "noEmit": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "types": ["node"]
+  },
+  "include": ["server/**/*.ts", "shared/**/*.ts"],
+  "exclude": ["node_modules"]
+}
