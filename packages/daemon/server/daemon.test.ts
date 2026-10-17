@@ -3,7 +3,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { WebSocket } from "ws";
+import { connectDaemon } from "../shared/connect.ts";
 import type { ClientMessage, DaemonMessage, DaemonState } from "../shared/protocol.ts";
 import { type Daemon, serve } from "./daemon.ts";
 
@@ -16,7 +16,7 @@ let home: string;
 let daemon: Daemon;
 
 beforeEach(async () => {
-  home = fs.mkdtempSync(path.join(os.tmpdir(), "miks-test-"));
+  home = fs.mkdtempSync(path.join(os.tmpdir(), "miks test-"));
   daemon = await serve({ socketPath: path.join(home, "miks.sock"), command: COMMAND });
 });
 
@@ -215,7 +215,7 @@ async function waitFor(check: () => Promise<boolean> | boolean, timeout = 5000) 
  * the snapshot into a fresh terminal, then every `output` after it.
  */
 async function connect() {
-  const socket = new WebSocket(`ws+unix://${path.join(home, "miks.sock")}:/ws`);
+  const socket = connectDaemon(path.join(home, "miks.sock"));
   await new Promise((resolve, reject) => {
     socket.once("open", resolve);
     socket.once("error", reject);

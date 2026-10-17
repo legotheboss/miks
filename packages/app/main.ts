@@ -3,8 +3,9 @@ import { app, BrowserWindow, ipcMain, Menu, shell } from "electron";
 import type { MenuItemConstructorOptions, WebContents } from "electron";
 import fs from "fs";
 import path from "path";
+import { connectDaemon as openDaemonSocket } from "miks/shared/connect";
 import { logPath, socketPath } from "miks/shared/paths";
-import { WebSocket } from "ws";
+import type { WebSocket } from "ws";
 
 // The Electron shell is deliberately thin: a window, a menu, and a pipe
 // between the renderer and the daemon's Unix socket (which the renderer
@@ -20,7 +21,7 @@ const daemonMain = path.join(repoRoot, "packages/daemon/server/main.ts");
 
 function connectOnce(): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
-    const socket = new WebSocket(`ws+unix://${socketPath()}:/ws`);
+    const socket = openDaemonSocket(socketPath());
     socket.once("open", () => resolve(socket));
     socket.once("error", reject);
   });

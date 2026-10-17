@@ -1,9 +1,10 @@
 {
   "dev": {
     "title": "Dev",
-    "description": "Electron with the UI's Vite server (hot reload); terminals live in the daemon, so restarting this is free",
+    "description": "Electron app with hot reload",
     "run": {
       "script": "dev"
-    }
+    },
+    "link": "http://localhost:2738"
   }
 }
