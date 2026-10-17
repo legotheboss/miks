@@ -120,6 +120,17 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     this.emit("change");
   }
 
+  /**
+   * A new tab where you are: in the current tab's directory, asked of its
+   * shell just now (the poll's could be seconds old), or the workspace's.
+   */
+  async newTab(workspaceId: string): Promise<string | undefined> {
+    const activeTabId = this.findWorkspace(workspaceId)?.activeTabId;
+    const pane = activeTabId ? this.panes.get(activeTabId) : undefined;
+    const cwd = (await pane?.cwd()) ?? (activeTabId ? this.cwds.get(activeTabId) : undefined);
+    return this.createTab(workspaceId, { cwd });
+  }
+
   createTab(
     workspaceId: string,
     { cwd, resumeClaudeSession }: { cwd?: string; resumeClaudeSession?: string } = {},

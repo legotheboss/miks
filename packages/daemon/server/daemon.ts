@@ -136,7 +136,7 @@ export async function serve({
         case "renameWorkspace":
           return workspaces.renameWorkspace(message.workspaceId, message.title);
         case "createTab":
-          workspaces.createTab(message.workspaceId);
+          workspaces.newTab(message.workspaceId);
           return;
         case "moveWorkspace":
           return workspaces.moveWorkspace(message.workspaceId, message.index);

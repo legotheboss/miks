@@ -358,6 +358,21 @@ test("a program in front of the shell is reported as running", async () => {
   await waitFor(() => daemon.workspaces.running()[0]?.program === "sleep");
 });
 
+test("a new tab starts where the current one is", async () => {
+  daemon.workspaces.createWorkspace({ cwd: home });
+  const workspaceId = daemon.workspaces.getState().workspaces[0].id;
+  const tabId = activeTab(daemon.workspaces.getState());
+  const subdir = path.join(home, "elsewhere");
+  fs.mkdirSync(subdir);
+
+  const pane = daemon.workspaces.getPane(tabId)!;
+  pane.write(`cd '${subdir}'\n`);
+  await waitFor(async () => (await pane.cwd()) === fs.realpathSync(subdir));
+
+  const newTabId = (await daemon.workspaces.newTab(workspaceId))!;
+  expect(await daemon.workspaces.getPane(newTabId)!.cwd()).toBe(fs.realpathSync(subdir));
+});
+
 test("programs that set mode 2031 hear when the appearance changes", async () => {
   daemon.workspaces.createWorkspace({ cwd: home });
   const tabId = activeTab(daemon.workspaces.getState());
