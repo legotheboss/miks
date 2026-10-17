@@ -7,7 +7,7 @@
 import fs from "fs";
 import { WebSocket } from "ws";
 
-const PORT = 2739;
+const PORT = Number(process.env.MIKS_DEVTOOLS_PORT ?? 2739);
 const [command, arg] = process.argv.slice(2);
 
 const targets: any[] = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();

@@ -22,7 +22,21 @@ export type PaneViewer = {
  * there instead: cmux's hooks would report to cmux, and `claude` would refuse
  * to start inside "another" Claude Code session.
  */
-const INHERITED_ENV_BLOCKLIST = [/^CMUX_/, /^GHOSTTY_/, /^TERM_PROGRAM/, /^CLAUDECODE$/, /^CLAUDE_CODE_ENTRYPOINT$/];
+const INHERITED_ENV_BLOCKLIST = [
+  /^CMUX_/,
+  /^GHOSTTY_/,
+  /^TERM_PROGRAM/,
+  /^CLAUDECODE$/,
+  /^CLAUDE_CODE_ENTRYPOINT$/,
+  // Miks's own: each pane sets its own MIKS_PANE_ID and MIKS_SOCKET, and the
+  // dev build's MIKS_UI_URL would point any Miks.app launched from a pane at
+  // the dev server.
+  /^MIKS_/,
+  // The daemon runs as Miks.app's binary in Node mode; a shell inheriting
+  // this would make every Electron app it launched (VS Code's `code`, say)
+  // start as plain Node instead.
+  /^ELECTRON_/,
+];
 
 /**
  * One shell in a PTY, plus a headless terminal emulator that sees every byte

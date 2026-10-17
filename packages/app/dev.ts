@@ -31,8 +31,17 @@ function startElectron() {
     stdio: "inherit",
     env: { ...process.env, MIKS_UI_URL: url },
   });
-  electron.on("exit", () => {
+  electron.on("exit", (code, signal) => {
     if (restarting) return;
+
+    // A crash (usually a broken edit to main.ts) waits for the next edit
+    // instead of ending `yarn dev`.
+    if (code !== 0 || signal) {
+      electron = null;
+      console.log(`Electron exited (${signal ?? `code ${code}`}); fix it and save to start it again.`);
+      return;
+    }
+
     // Quitting the app ends `yarn dev` too.
     server.close().finally(() => process.exit(0));
   });
@@ -44,12 +53,14 @@ for (const file of ["main.ts", "preload.cjs"]) {
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
       console.log(`${file} changed; restarting Electron.`);
+      if (!electron) return startElectron();
+
       restarting = true;
-      electron?.once("exit", () => {
+      electron.once("exit", () => {
         restarting = false;
         startElectron();
       });
-      electron?.kill();
+      electron.kill();
     }, 200);
   });
 }

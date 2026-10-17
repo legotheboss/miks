@@ -5,6 +5,9 @@ import { serve } from "./daemon.ts";
 const [command] = process.argv.slice(2);
 
 if (command === "serve") {
+  // What `ps` and `pkill` see, instead of the binary it runs on.
+  process.title = "miks-daemon";
+
   const daemon = await serve({ socketPath: socketPath() });
 
   // Start with something to look at.

@@ -4,7 +4,7 @@ import type { MenuItemConstructorOptions, WebContents } from "electron";
 import fs from "fs";
 import path from "path";
 import { connectDaemon as openDaemonSocket } from "miks/shared/connect";
-import { logPath, socketPath } from "miks/shared/paths";
+import { logPath, miksHome, socketPath } from "miks/shared/paths";
 import type { WebSocket } from "ws";
 
 // The Electron shell is deliberately thin: a window, a menu, and a pipe
@@ -12,8 +12,10 @@ import type { WebSocket } from "ws";
 // can't open itself). Every terminal lives in the daemon, so quitting this
 // app, or reloading its window, leaves them all running.
 
-const repoRoot = path.resolve(import.meta.dirname, "../..");
-const daemonMain = path.join(repoRoot, "packages/daemon/server/main.ts");
+// The repo in development; Contents/Resources/app inside Miks.app.
+const root = path.resolve(import.meta.dirname, "../..");
+const daemonMain = path.join(root, "packages/daemon/server/main.ts");
+const iconPath = path.join(root, "packages/app/icon/icon.png");
 
 //
 // The daemon.
@@ -50,15 +52,16 @@ function startDaemon() {
   fs.mkdirSync(path.dirname(logPath()), { recursive: true, mode: 0o700 });
   const log = fs.openSync(logPath(), "a");
 
-  // The daemon runs on the system's Node, not Electron's, so node-pty's
-  // prebuilt binary matches it and nothing needs rebuilding for Electron.
-  // Apps launched from the Finder get a bare PATH, hence the usual suspects.
-  const env = { ...process.env };
+  // The daemon runs on our own binary as plain Node (node-pty's prebuilt
+  // binary uses Node-API, so it loads in any Node), which needs nothing
+  // installed and makes macOS attribute the daemon, and the programs in its
+  // terminals, to Miks. Apps launched from the Finder get a bare PATH, hence
+  // the usual suspects.
+  const env: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: "1" };
   env.PATH = [env.PATH, "/opt/homebrew/bin", "/usr/local/bin"].filter(Boolean).join(":");
-  delete env.ELECTRON_RUN_AS_NODE;
 
   // Detached, so it outlives us: that's the whole point.
-  const child = spawn(process.env.MIKS_NODE ?? "node", [daemonMain, "serve"], {
+  const child = spawn(process.execPath, [daemonMain, "serve"], {
     detached: true,
     stdio: ["ignore", log, log],
     env,
@@ -131,6 +134,11 @@ function createWindow() {
     links.delete(contents);
   });
 
+  // Nothing navigates the window away from the UI (a stray file drop would).
+  contents.on("will-navigate", (event, url) => {
+    if (new URL(url).origin !== new URL(contents.getURL()).origin) event.preventDefault();
+  });
+
   // Links clicked in a terminal open in the real browser.
   contents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
@@ -139,7 +147,7 @@ function createWindow() {
 
   const devUrl = process.env.MIKS_UI_URL;
   if (devUrl) window.loadURL(devUrl);
-  else window.loadFile(path.join(repoRoot, "packages/ui/dist/index.html"));
+  else window.loadFile(path.join(root, "packages/ui/dist/index.html"));
 }
 
 //
@@ -198,7 +206,15 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+app.setName("Miks");
+
+// Electron keeps its browser profile under the app's name by default, which
+// is the daemon's own folder; give it a room of its own there.
+app.setPath("userData", path.join(miksHome(), "UI"));
+
 app.whenReady().then(() => {
+  // Miks.app has its icon in its bundle; the dev build is plain Electron.
+  if (!app.isPackaged) app.dock?.setIcon(iconPath);
   buildMenu();
   createWindow();
 

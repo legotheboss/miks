@@ -28,6 +28,10 @@ const miksFonts = [
   fonts.displayBold.override({ face: systemUI, weight: "600" }),
 ];
 
+// A file dropped anywhere but a terminal would otherwise open in the window.
+window.addEventListener("dragover", (event) => event.preventDefault());
+window.addEventListener("drop", (event) => event.preventDefault());
+
 const root = createRoot(document.getElementById("root")!);
 root.render(
   <StrictMode>

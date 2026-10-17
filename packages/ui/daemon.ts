@@ -13,6 +13,7 @@ type MiksBridge = {
   onMessage(listener: (message: string) => void): Unsubscribe;
   onStatus(listener: (status: { connected: boolean; error?: string }) => void): Unsubscribe;
   onCommand(listener: (command: string) => void): Unsubscribe;
+  pathForFile(file: File): string;
 };
 
 declare global {

@@ -124,6 +124,23 @@ test("attaching without a size leaves the pane alone and reports its size", asyn
   second.close();
 });
 
+test("panes get their own MIKS_ variables, not the daemon's", async () => {
+  // As when the dev build starts the daemon: its own MIKS_UI_URL, and a
+  // MIKS_PANE_ID if it was launched from inside a Miks pane.
+  process.env.MIKS_UI_URL = "http://localhost:2738/";
+  process.env.MIKS_PANE_ID = "outer-pane";
+  try {
+    daemon.workspaces.createWorkspace({ cwd: home });
+  } finally {
+    delete process.env.MIKS_UI_URL;
+    delete process.env.MIKS_PANE_ID;
+  }
+  const tabId = activeTab(daemon.workspaces.getState());
+
+  daemon.workspaces.getPane(tabId)!.write('echo "url=[$MIKS_UI_URL] pane=[$MIKS_PANE_ID]"\n');
+  await waitFor(() => paneText(tabId).then((text) => text.includes(`url=[] pane=[${tabId}]`)));
+});
+
 test("hooks drive the agent status", async () => {
   daemon.workspaces.createWorkspace({ cwd: home });
   const tabId = activeTab(daemon.workspaces.getState());

@@ -33,8 +33,17 @@ so before doing it to the real one.
 - Experiment against a scratch daemon, never the real one:
   `MIKS_HOME=/tmp/mk yarn dev`. Keep `MIKS_HOME` short; macOS caps socket
   paths at 104 bytes.
+- `yarn install:app` builds Miks.app, signs it with the keychain's Developer
+  ID (a stable signature is what keeps the permissions macOS grants Miks, and
+  so everything in its terminals, across reinstalls), and swaps it into
+  /Applications, relaunching it if it was running. It quits only the UI, found
+  by bundle ID: the daemon runs on the same binary, so never `pkill -x Miks`.
+  The running daemon keeps its old code until it next starts.
 - Real state lives in `~/Library/Application Support/Miks` (socket,
-  `daemon.log`).
+  `daemon.log`, and Electron's profile in `UI/`). The dev build and Miks.app
+  share it, and so share one daemon.
+- The icon: `packages/app/icon/make-icon.sh` turns `source.png` (full-bleed
+  square) into `icon.png` (dev Dock icon) and `Miks.icns`.
 - `node scripts/devtools.ts screenshot out.png` / `eval '<js>'` drive the
   running dev app over its DevTools port (2739): how to check UI work without
   screen-recording permission. `curl --unix-socket <sock> http://miks/api/state`
@@ -53,8 +62,15 @@ resizes); keep it passing.
 - The daemon and Electron main run TypeScript straight from source (Node 24 /
   Electron 44 type stripping): use `.ts` import extensions in the daemon,
   `import type` for types (`verbatimModuleSyntax` enforces it), no enums.
-- The daemon runs on the system Node, not Electron's, so node-pty's prebuilt
-  binary works without an Electron rebuild.
+- The daemon runs on the app's own binary as plain Node
+  (`ELECTRON_RUN_AS_NODE`): node-pty's prebuilt binary is Node-API, so no
+  rebuild, nothing installed, and macOS attributes the daemon to Miks. It
+  calls itself `miks-daemon` (`process.title`).
+- Inside Miks.app, `node_modules/miks` is a stub package re-exporting
+  `packages/daemon/shared`: Node won't strip types under node_modules, and the
+  packager rewrites symlinks to absolute paths, which codesign rejects.
+- `open` passes the calling shell's environment, so launching Miks.app from a
+  Miks pane used to carry that pane's variables in.
 - Third-party install scripts are off globally; `scripts/postinstall.ts` does
   the two Miks needs (node-pty's spawn-helper exec bit, Electron's download).
 - Every size change is a SIGWINCH that makes full-screen programs (Claude Code,
@@ -63,9 +79,11 @@ resizes); keep it passing.
   tabs attach without a size and adopt the pane's.
 - Only attached clients answer terminal queries (the headless emulator's
   replies are dropped, as in VS Code), so each query gets one answer.
-- Panes strip `CMUX_*`, `GHOSTTY_*`, `TERM_PROGRAM*` and `CLAUDECODE` from the
-  launching environment, or programs inside think they're running in cmux, or
-  inside another Claude Code.
+- Panes strip `CMUX_*`, `GHOSTTY_*`, `TERM_PROGRAM*`, `CLAUDECODE`,
+  `ELECTRON_*` and inherited `MIKS_*` from the daemon's environment, or
+  programs inside think they're in cmux or another Claude Code, Electron apps
+  start as plain Node, and a Miks.app launched from a pane loads the dev
+  server.
 
 # Agent status
 

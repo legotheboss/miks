@@ -5,7 +5,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { ITheme, Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useMatchMedia } from "crosswing/hooks/useMatchMedia";
-import { HTMLAttributes, useEffect, useRef } from "react";
+import { DragEvent, HTMLAttributes, useEffect, useRef } from "react";
 import { styled } from "styled-components";
 import { daemon } from "./daemon";
 
@@ -118,7 +118,32 @@ export function TerminalView({
     };
   }, [active]);
 
-  return <StyledTerminalView ref={containerRef} data-active={active} {...rest} />;
+  // Dropping files types their paths, escaped the way Terminal.app does it,
+  // which is also how Claude Code recognizes a dropped image.
+  function onDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const files = Array.from(event.dataTransfer.files);
+    const paths = files.map((file) => window.miks?.pathForFile(file)).filter(Boolean) as string[];
+    if (paths.length === 0) return;
+
+    viewRef.current?.terminal.paste(paths.map(shellEscape).join(" ") + " ");
+    viewRef.current?.terminal.focus();
+  }
+
+  return (
+    <StyledTerminalView
+      ref={containerRef}
+      data-active={active}
+      onDragOver={(event) => event.preventDefault()}
+      onDrop={onDrop}
+      {...rest}
+    />
+  );
+}
+
+function shellEscape(path: string): string {
+  // Only ASCII characters the shell treats specially; "é" stays as it is.
+  return path.replace(/[\s!"#$&'()*;<>?[\\\]^`{|}~]/g, "\\$&");
 }
 
 /**

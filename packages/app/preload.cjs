@@ -1,6 +1,6 @@
 // The renderer's only door to the daemon, exposed as `window.miks` (typed in
 // packages/ui/bridge.ts). CommonJS because sandboxed preloads can't be ESM.
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("miks", {
   /** (Re)connects this page to the daemon; status arrives via onStatus. */
@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld("miks", {
   onMessage: (listener) => subscribe("miks:message", listener),
   onStatus: (listener) => subscribe("miks:status", listener),
   onCommand: (listener) => subscribe("miks:command", listener),
+  /** The path of a dropped file; File.path no longer exists in Electron. */
+  pathForFile: (file) => webUtils.getPathForFile(file),
 });
 
 function subscribe(channel, listener) {

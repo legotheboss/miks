@@ -26,9 +26,11 @@
     "daemon": "yarn workspace miks daemon",
     "build": "yarn workspace ui build",
     "start": "yarn workspace app start",
-    "build:linters": "tsc -p .eslint/tsconfig.json"
+    "build:linters": "tsc -p .eslint/tsconfig.json",
+    "install:app": "node scripts/install-app.ts"
   },
   "devDependencies": {
+    "@electron/packager": "^20.3.0",
     "@rolldown/plugin-babel": "^0.2.4",
     "@types/debug": "^4.1.13",
     "@types/node": "^26.6.4",
