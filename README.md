@@ -1,4 +1,4 @@
-<!-- Screenshot goes here. -->
+<img width="885" height="650" alt="miks" src="https://github.com/user-attachments/assets/da1287b6-3a96-496a-81e0-1d4436a3d69e" />
 
 # Miks
 
