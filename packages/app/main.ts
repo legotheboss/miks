@@ -369,6 +369,8 @@ function buildMenu() {
     {
       label: "View",
       submenu: [
+        command("toggleSidebar", "CmdOrCtrl+B", "Toggle sidebar"),
+        { type: "separator" },
         command("fontBigger", "CmdOrCtrl+=", "Bigger text"),
         command("fontSmaller", "CmdOrCtrl+-", "Smaller text"),
         command("fontReset", "CmdOrCtrl+0", "Actual size"),

@@ -79,7 +79,14 @@ export function TerminalView({
 
     // Adopting the pane's size from a snapshot echoes it back here too, which
     // the daemon ignores since nothing changed.
-    const resize = terminal.onResize(({ cols, rows }) => daemon.send({ type: "resize", tabId, cols, rows }));
+    // The daemon hears about a new size once it settles. Dragging the sidebar
+    // or the window edge refits on every frame, and each size the pane takes
+    // is a SIGWINCH that makes Claude Code or vim redraw.
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+    const resize = terminal.onResize(({ cols, rows }) => {
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => daemon.send({ type: "resize", tabId, cols, rows }), 100);
+    });
 
     const observer = new ResizeObserver(() => {
       if (activeRef.current) fit.fit();
@@ -91,6 +98,7 @@ export function TerminalView({
       input.dispose();
       binary.dispose();
       resize.dispose();
+      if (resizeTimer) clearTimeout(resizeTimer);
       unconnect();
       unstream();
       daemon.send({ type: "detach", tabId });

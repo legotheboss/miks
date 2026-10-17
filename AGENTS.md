@@ -83,7 +83,11 @@ resizes); keep it passing.
 - Every size change is a SIGWINCH that makes full-screen programs (Claude Code,
   vim) redraw. Only the on-screen terminal sets a pane's size, after its WebGL
   renderer loads (the DOM renderer measures characters differently); hidden
-  tabs attach without a size and adopt the pane's.
+  tabs attach without a size and adopt the pane's; and a new size reaches the
+  daemon only once it has held for 100ms, so animating or dragging the
+  sidebar (a PanelLayout) or the window edge sends one, not one per frame.
+- With the sidebar hidden (⌘B), the traffic lights sit over the tab bar,
+  which is inset to clear them; the sidebar's minimum width does the same.
 - Only attached clients answer terminal queries (the headless emulator's
   replies are dropped, as in VS Code), so each query gets one answer.
 - Panes strip `CMUX_*`, `GHOSTTY_*`, `TERM_PROGRAM*`, `CLAUDE*`,

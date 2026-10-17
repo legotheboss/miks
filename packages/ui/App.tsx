@@ -1,4 +1,5 @@
 import { colors } from "crosswing/colors";
+import { PanelLayout } from "crosswing/components/PanelLayout";
 import { fonts } from "crosswing/fonts";
 import { useMatchMedia } from "crosswing/hooks/useMatchMedia";
 import { useDialog } from "crosswing/modals/dialog";
@@ -7,15 +8,16 @@ import { DEFAULT_SETTINGS } from "miks/shared/settings";
 import { useEffect, useRef } from "react";
 import { styled } from "styled-components";
 import { daemon, useDaemon } from "./daemon";
-import { getSettings, setFontSize, useSettings } from "./settings";
+import { getSettings, setFontSize, updateSettings, useSettings } from "./settings";
 import { Sidebar } from "./Sidebar";
 import { workspaceTitle } from "./status";
-import { TabBar } from "./TabBar";
+import { StyledTabBar, TabBar } from "./TabBar";
 import { SettingsDialog } from "./SettingsDialog";
 import { TERMINAL_BACKGROUND, TerminalView } from "./TerminalView";
 
 export function App() {
   const { state, connected, error } = useDaemon();
+  const { sidebarVisible } = useSettings();
 
   const settingsDialog = useDialog(() => <SettingsDialog onClose={settingsDialog.hide} />);
 
@@ -48,32 +50,46 @@ export function App() {
 
   return (
     <StyledApp>
-      <Sidebar
-        className="sidebar"
-        workspaces={state.workspaces}
-        activeWorkspaceId={state.activeWorkspaceId}
-        home={state.home}
-      />
-      <div className="main">
-        {activeWorkspace ? <TabBar workspace={activeWorkspace} /> : <div className="empty-bar" />}
-        <div className="terminals">
-          {/* Every tab's terminal stays mounted, so switching is instant. */}
-          {state.workspaces.flatMap((workspace) =>
-            workspace.tabs.map((tab) => (
-              <TerminalView
-                key={tab.id}
-                tabId={tab.id}
-                active={workspace.id === state.activeWorkspaceId && tab.id === workspace.activeTabId}
-              />
-            )),
-          )}
-          {!activeWorkspace && (
-            <div className="empty">
-              <button onClick={() => daemon.send({ type: "createWorkspace" })}>New workspace</button>
-            </div>
-          )}
+      <PanelLayout
+        className="layout"
+        edge="left"
+        // Always beside the terminals, never over them.
+        mode="shrink"
+        panelVisible={sidebarVisible}
+        onPanelVisibleChange={(visible) => updateSettings({ sidebarVisible: visible })}
+        panelDefaultSize={230}
+        // Room for the traffic lights, which sit over the sidebar's top.
+        panelMinSize={180}
+        panelMaxSize={480}
+        contentMinSize={320}
+        // ⌘B is a menu item; a hotkey here would never see it past the terminal.
+        hotkey={null}
+        hideToolbarButton
+        hideDragHandle
+        restorationKey={Sidebar}
+      >
+        <div className="main" data-sidebar-visible={sidebarVisible}>
+          {activeWorkspace ? <TabBar workspace={activeWorkspace} /> : <div className="empty-bar" />}
+          <div className="terminals">
+            {/* Every tab's terminal stays mounted, so switching is instant. */}
+            {state.workspaces.flatMap((workspace) =>
+              workspace.tabs.map((tab) => (
+                <TerminalView
+                  key={tab.id}
+                  tabId={tab.id}
+                  active={workspace.id === state.activeWorkspaceId && tab.id === workspace.activeTabId}
+                />
+              )),
+            )}
+            {!activeWorkspace && (
+              <div className="empty">
+                <button onClick={() => daemon.send({ type: "createWorkspace" })}>New workspace</button>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+        <Sidebar workspaces={state.workspaces} activeWorkspaceId={state.activeWorkspaceId} home={state.home} />
+      </PanelLayout>
     </StyledApp>
   );
 }
@@ -86,16 +102,19 @@ export const StyledApp = styled.div`
   color: ${colors.text()};
   font: ${fonts.display({ size: 13 })};
 
-  > .sidebar {
-    width: 230px;
-    flex-shrink: 0;
-  }
-
-  > .main {
+  > .layout {
     flex-grow: 1;
     min-width: 0;
+  }
+
+  .main {
     display: flex;
     flex-flow: column;
+
+    /* With the sidebar hidden, the traffic lights sit over the tab bar. */
+    &[data-sidebar-visible="false"] > ${StyledTabBar}, &[data-sidebar-visible="false"] > .empty-bar {
+      padding-left: 80px;
+    }
 
     > .empty-bar {
       height: 38px;
@@ -151,6 +170,8 @@ export const StyledApp = styled.div`
  */
 function runCommand(command: string) {
   switch (command) {
+    case "toggleSidebar":
+      return updateSettings({ sidebarVisible: !getSettings().sidebarVisible });
     case "fontBigger":
       return setFontSize(getSettings().fontSize + 1);
     case "fontSmaller":

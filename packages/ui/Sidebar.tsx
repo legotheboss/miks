@@ -63,7 +63,7 @@ export const StyledSidebar = styled.div`
   display: flex;
   flex-flow: column;
   background: ${colors.textBackgroundPanel()};
-  border-right: 1px solid ${colors.separator()};
+  height: 100%;
   user-select: none;
 
   > .titlebar {

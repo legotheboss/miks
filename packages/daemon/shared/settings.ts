@@ -8,10 +8,13 @@ export type Settings = {
   hidePathPrefix: string;
   /** Whether to notify when an agent finishes or needs you. */
   notifications: boolean;
+  /** Whether the sidebar is showing (⌘B). */
+  sidebarVisible: boolean;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
   fontSize: 13,
   hidePathPrefix: "",
   notifications: true,
+  sidebarVisible: true,
 };
