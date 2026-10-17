@@ -48,21 +48,23 @@ function startElectron() {
 }
 
 let timer: NodeJS.Timeout | null = null;
-for (const file of ["main.ts", "preload.cjs"]) {
-  fs.watch(path.join(appDir, file), () => {
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => {
-      console.log(`${file} changed; restarting Electron.`);
-      if (!electron) return startElectron();
+// The folder, not the files: an editor that saves by replacing a file (most
+// do, as does `sed -i`) leaves a watch on the file itself watching nothing.
+fs.watch(appDir, (_event, file) => {
+  if (file !== "main.ts" && file !== "preload.cjs") return;
 
-      restarting = true;
-      electron.once("exit", () => {
-        restarting = false;
-        startElectron();
-      });
-      electron.kill();
-    }, 200);
-  });
-}
+  if (timer) clearTimeout(timer);
+  timer = setTimeout(() => {
+    console.log(`${file} changed; restarting Electron.`);
+    if (!electron) return startElectron();
+
+    restarting = true;
+    electron.once("exit", () => {
+      restarting = false;
+      startElectron();
+    });
+    electron.kill();
+  }, 200);
+});
 
 startElectron();

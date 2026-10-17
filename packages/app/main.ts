@@ -197,6 +197,17 @@ function createWindow() {
     links.delete(contents);
   });
 
+  // ⌘⇧↑/↓ (previous and next workspace) are also text editing commands
+  // (select to start and end), and the terminal's hidden text field takes
+  // them before the menu gets a look. So they're caught here, before the page.
+  contents.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown" || !input.meta || !input.shift || input.alt || input.control) return;
+    const command = { ArrowUp: "previousWorkspace", ArrowDown: "nextWorkspace" }[input.key];
+    if (!command) return;
+    event.preventDefault();
+    contents.send("miks:command", command);
+  });
+
   // Nothing navigates the window away from the UI (a stray file drop would).
   contents.on("will-navigate", (event, url) => {
     if (new URL(url).origin !== new URL(contents.getURL()).origin) event.preventDefault();
