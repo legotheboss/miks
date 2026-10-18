@@ -63,7 +63,7 @@ Never SIGTERM a Miks UI; that's an ordinary quit.
   kept running ("Keep terminals running") is left on the old one.
   `MIKS_UPDATE_FEED` points a packaged copy at a test feed; verified that way
   against a local `python3 -m http.server`.
-- Remote windows (Settings → Remotes; File → Open window on): a window on
+- Remote windows (Settings → Remotes; the Remotes menu, ⌃⌥⌘1–9): a window on
   another Mac's daemon through `ssh -N -L <local sock>:<remote sock>`
   (`packages/app/tunnels.ts`), so no daemon ever listens on the network. One
   window per daemon; each window's machine is in `windowRemotes`, and every

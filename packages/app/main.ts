@@ -553,20 +553,6 @@ function buildMenu() {
         { type: "separator" },
         command("closeTab", "CmdOrCtrl+W", "Close tab"),
         command("closeWorkspace", "CmdOrCtrl+Shift+W", "Close workspace"),
-        { type: "separator" },
-        {
-          label: "Open window on",
-          submenu: [
-            { label: "This Mac", click: () => openWindow() },
-            ...(settings.remotes.length ? [{ type: "separator" as const }] : []),
-            ...settings.remotes.map((remote) => ({ label: remote.name, click: () => openWindow(remote.id) })),
-            { type: "separator" },
-            {
-              label: "Add a Mac…",
-              click: (_item, window) => (window as BrowserWindow | undefined ?? openWindow()).webContents.send("miks:command", "settingsRemotes"),
-            },
-          ],
-        },
       ],
     },
     {
@@ -599,6 +585,28 @@ function buildMenu() {
         { role: "toggleDevTools" },
         { type: "separator" },
         { role: "togglefullscreen" },
+      ],
+    },
+    {
+      // A window on each Mac's terminals, one keystroke away: ⌃⌥⌘ with a
+      // digit, which next to nothing else uses.
+      label: "Remotes",
+      submenu: [
+        { label: "This Mac", accelerator: "Ctrl+Alt+Cmd+0", click: () => openWindow() },
+        { type: "separator" },
+        ...settings.remotes
+          .filter((remote) => remote.name && remote.host)
+          .map((remote, i): MenuItemConstructorOptions => ({
+            label: remote.name,
+            accelerator: i < 9 ? `Ctrl+Alt+Cmd+${i + 1}` : undefined,
+            click: () => openWindow(remote.id),
+          })),
+        { type: "separator" },
+        {
+          label: "Add a Mac…",
+          click: (_item, window) =>
+            ((window as BrowserWindow | undefined) ?? openWindow()).webContents.send("miks:command", "settingsRemotes"),
+        },
       ],
     },
     {

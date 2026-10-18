@@ -132,7 +132,7 @@ function RemoteSettings() {
       <p className="intro">
         A window on another Mac's terminals, as if you were there. It connects over SSH, so <code>ssh host</code> has to
         work from here without a password, and that Mac needs Remote Login on and Miks running. Open one here, or from
-        File → Open window on.
+        the Remotes menu (⌃⌥⌘1, ⌃⌥⌘2…).
       </p>
       {remotes.length > 0 && (
         <SeparatorLayout bordered>
