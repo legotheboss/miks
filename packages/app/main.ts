@@ -561,9 +561,8 @@ function buildMenu() {
         command("newWorkspace", "CmdOrCtrl+N", "New workspace"),
         { type: "separator" },
         command("closeTab", "CmdOrCtrl+W", "Close tab"),
-        // Out of the way: ⌘⇧W closes the window, as everywhere else on a Mac,
-        // and a workspace is a lot to lose by a slip.
-        command("closeWorkspace", "CmdOrCtrl+Alt+Shift+W", "Close workspace"),
+        // Not ⌘⇧W, which closes the window, as everywhere else on a Mac.
+        command("closeWorkspace", "CmdOrCtrl+Alt+W", "Close workspace"),
         { role: "close", label: "Close window", accelerator: "CmdOrCtrl+Shift+W" },
       ],
     },
