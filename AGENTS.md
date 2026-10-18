@@ -38,8 +38,11 @@ Never SIGTERM a Miks UI; that's an ordinary quit.
   that, not its script path (`pkill -f main.ts` misses it); for a scratch one,
   find it by its socket (`lsof -p <pid> | grep miks.sock`).
 - Experiment against a scratch daemon, never the real one:
-  `MIKS_HOME=/tmp/mk yarn dev`. Keep `MIKS_HOME` short; macOS caps socket
-  paths at 104 bytes.
+  `MIKS_BACKGROUND=1 MIKS_HOME=/tmp/mk yarn dev`. Keep `MIKS_HOME` short;
+  macOS caps socket paths at 104 bytes. `MIKS_BACKGROUND` keeps its windows
+  from taking focus (no Dock icon, `showInactive`); screenshots still work.
+  A page's own `window.close()` skips BrowserWindow's `close` event, so it
+  can't test anything hooked there.
 - `yarn install:app` builds Miks.app, signs it with the keychain's Developer
   ID (a stable signature is what keeps the permissions macOS grants Miks, and
   so everything in its terminals, across reinstalls), and rsyncs it over
@@ -72,7 +75,11 @@ Never SIGTERM a Miks UI; that's an ordinary quit.
   Dropped files upload (`upload` → `uploaded`, saved in the daemon's tmpdir).
   Focusing a window re-sends its size and appearance, so the Mac you're at
   wins. Open remote windows reopen at launch (`UI/remote-windows.json`).
-  `PROTOCOL_VERSION` warns when two Miks disagree. Test without another Mac:
+  `PROTOCOL_VERSION` warns when two Miks disagree. A Mac's Miks quitting
+  while another Mac's window is on its daemon sends `stopWhenIdle`, so the
+  daemon stops when that window goes (which then asks, if programs run);
+  its windows connecting send it false. Restart daemon… follows the focused
+  window; a remote's restarts itself (`POST /api/restart`, which re-execs). Test without another Mac:
   `MIKS_SSH=scripts/fake-ssh.ts FAKE_SSH_HOME=/tmp/fh`, with a second daemon
   at `MIKS_HOME="/tmp/fh/Library/Application Support/Miks"`.
 - Miks keeps its Claude Code hooks in `~/.claude/settings.json` itself

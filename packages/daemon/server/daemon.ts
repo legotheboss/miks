@@ -28,6 +28,7 @@ export async function serve({
   statePath,
   command,
   claudeCommand,
+  onStop,
 }: {
   socketPath: string;
   /** Where the layout is saved and restored from; none, no persistence. */
@@ -36,6 +37,12 @@ export async function serve({
   command?: string[];
   /** What resumes a Claude session. For tests. */
   claudeCommand?: string;
+  /**
+   * Asked to stop: when the last window left after its Mac's Miks quit, or
+   * to restart (Restart daemon… from any window, this Mac's or another's,
+   * which can't start one itself). Without it, neither is offered.
+   */
+  onStop?: (restart: boolean) => void;
 }): Promise<Daemon> {
   // macOS caps socket paths at 104 bytes and quietly truncates longer ones.
   if (Buffer.byteLength(socketPath) > 103) {
@@ -61,6 +68,7 @@ export async function serve({
 
   // Connected UIs.
   const sockets = new Set<WebSocket>();
+  let stopWhenIdle = false;
 
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://miks");
@@ -68,7 +76,14 @@ export async function serve({
     if (req.method === "GET" && url.pathname === "/api/ping") {
       // How many UIs are connected, so one quitting can tell whether another
       // (the dev build beside Miks.app, say) still needs the daemon.
-      return json(res, 200, { ok: true, pid: process.pid, clients: sockets.size });
+      return json(res, 200, { ok: true, pid: process.pid, clients: sockets.size, stopWhenIdle });
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/restart") {
+      if (!onStop) return json(res, 501, { message: "This daemon can't restart itself." });
+      json(res, 200, { ok: true });
+      setImmediate(() => onStop(true));
+      return;
     }
 
     if (req.method === "GET" && url.pathname === "/api/running") {
@@ -143,6 +158,9 @@ export async function serve({
           return workspaces.moveWorkspace(message.workspaceId, message.index);
         case "moveTab":
           return workspaces.moveTab(message.tabId, message.index);
+        case "stopWhenIdle":
+          stopWhenIdle = message.value;
+          return;
         case "appearance":
           return workspaces.setDark(message.dark);
         case "closeTab":
@@ -188,6 +206,7 @@ export async function serve({
     socket.on("close", () => {
       sockets.delete(socket);
       for (const [tabId, viewer] of viewers) workspaces.getPane(tabId)?.detach(viewer);
+      if (stopWhenIdle && sockets.size === 0) onStop?.(false);
     });
   });
 

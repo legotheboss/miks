@@ -6,7 +6,7 @@
  * Bumped when a message changes shape or appears, so a UI talking to another
  * Mac's daemon can tell it's a different Miks. Before 2 there was none.
  */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 /**
  * What a coding agent in a pane is up to, as reported by its hooks.
@@ -92,6 +92,12 @@ export type ClientMessage =
    * paths: the daemon saves it and answers `uploaded` with where.
    */
   | { type: "upload"; tabId: string; name: string; data: string }
+  /**
+   * From the Mac's own Miks: true when it quit while a window on another Mac
+   * still had the daemon, which then stops once the last window goes; false
+   * when it's back, taking the daemon over again. Since protocol 3.
+   */
+  | { type: "stopWhenIdle"; value: boolean }
   /** The UI cleared its terminal (⌘K); the daemon's copy follows. */
   | { type: "clear"; tabId: string }
   | { type: "input"; tabId: string; data: string }

@@ -508,6 +508,49 @@ test("a zsh tab's own commands come back first on ↑ when it's restored", async
   await run(["\x1b[A", "\x1b[A", "\r"], "multi\r\nline");
 });
 
+test("after its Mac's Miks quits, the daemon stops when the last window goes", async () => {
+  await daemon.close();
+  const stops: boolean[] = [];
+  daemon = await serve({ socketPath: path.join(home, "miks.sock"), command: COMMAND, onStop: (restart) => stops.push(restart) });
+
+  const local = await connect();
+  const remote = await connect();
+  await local.state();
+  await remote.state();
+
+  // The Mac's own Miks quits, with a window on another Mac still open.
+  local.send({ type: "stopWhenIdle", value: true });
+  await local.state(); // The message has landed.
+  local.close();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(stops).toEqual([]);
+
+  remote.close();
+  await waitFor(() => stops.length === 1);
+  expect(stops).toEqual([false]);
+});
+
+test("Miks coming back cancels the stop, and any window can ask for a restart", async () => {
+  await daemon.close();
+  const stops: boolean[] = [];
+  daemon = await serve({ socketPath: path.join(home, "miks.sock"), command: COMMAND, onStop: (restart) => stops.push(restart) });
+
+  const remote = await connect();
+  await remote.state();
+  remote.send({ type: "stopWhenIdle", value: true });
+  const local = await connect();
+  local.send({ type: "stopWhenIdle", value: false });
+  await local.state();
+  remote.close();
+  local.close();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(stops).toEqual([]);
+
+  expect(await apiPost("/api/restart")).toBe(200);
+  await waitFor(() => stops.length === 1);
+  expect(stops).toEqual([true]);
+});
+
 test("programs that set mode 2031 hear when the appearance changes", async () => {
   daemon.workspaces.createWorkspace({ cwd: home });
   const tabId = activeTab(daemon.workspaces.getState());
@@ -574,6 +617,19 @@ async function paneText(tabId: string, cols = 80, rows = 24): Promise<string> {
   const screen = await client.screen(tabId);
   client.close();
   return screen.text;
+}
+
+/** A POST with no body; resolves with the status. */
+async function apiPost(apiPath: string): Promise<number> {
+  const http = await import("http");
+  return new Promise((resolve, reject) => {
+    const req = http.request({ socketPath: path.join(home, "miks.sock"), path: apiPath, method: "POST" }, (res) => {
+      res.resume();
+      res.on("end", () => resolve(res.statusCode ?? 0));
+    });
+    req.on("error", reject);
+    req.end();
+  });
 }
 
 async function postHook(tabId: string, payload: any) {
