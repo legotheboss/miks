@@ -14,6 +14,8 @@ export type Settings = {
   keepDaemonRunning: boolean;
   /** Whether Miks keeps its hooks in Claude Code's settings, for agent status. */
   claudeHooks: boolean;
+  /** Whether Option sends Meta (⌥A as Escape-A, for zsh bindings) instead of typing å. */
+  optionAsMeta: boolean;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -23,6 +25,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sidebarVisible: true,
   keepDaemonRunning: false,
   claudeHooks: true,
+  optionAsMeta: true,
 };
 
 /**

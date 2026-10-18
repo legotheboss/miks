@@ -30,7 +30,7 @@ export function TerminalView({
   const activeRef = useRef(active);
   activeRef.current = active;
   const dark = useMatchMedia("(prefers-color-scheme: dark)");
-  const { fontSize } = useSettings();
+  const { fontSize, optionAsMeta } = useSettings();
 
   useEffect(() => {
     const terminal = new Terminal({
@@ -40,6 +40,7 @@ export function TerminalView({
       scrollback: 10_000,
       allowProposedApi: true,
       macOptionClickForcesSelection: true,
+      macOptionIsMeta: getSettings().optionAsMeta,
       theme: dark ? darkTheme : lightTheme,
     });
     const fit = new FitAddon();
@@ -119,6 +120,10 @@ export function TerminalView({
   useEffect(() => {
     if (viewRef.current) viewRef.current.terminal.options.theme = dark ? darkTheme : lightTheme;
   }, [dark]);
+
+  useEffect(() => {
+    if (viewRef.current) viewRef.current.terminal.options.macOptionIsMeta = optionAsMeta;
+  }, [optionAsMeta]);
 
   // A new font size changes how many cells fit, so the visible terminal
   // refits (resizing its pane); hidden ones refit when they come on screen.

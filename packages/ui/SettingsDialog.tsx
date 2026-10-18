@@ -48,6 +48,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           onClick={() => updateSettings({ notifications: !settings.notifications })}
         />
         <LabeledToggle
+          label="Option as Meta"
+          detail="⌥ with a key sends Escape and the key, as shell shortcuts expect, instead of typing a character like å."
+          on={settings.optionAsMeta}
+          onClick={() => updateSettings({ optionAsMeta: !settings.optionAsMeta })}
+        />
+        <LabeledToggle
           label="Claude Code status"
           detail="Adds hooks to ~/.claude/settings.json that tell Miks what Claude is up to. Outside Miks they do nothing."
           on={settings.claudeHooks}
