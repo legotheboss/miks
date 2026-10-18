@@ -3,6 +3,10 @@ ZDOTDIR=$MIKS_USER_ZDOTDIR
 MIKS_USER_ZDOTDIR=$ZDOTDIR
 ZDOTDIR=$__miks_zdotdir
 
+# Miks's pbcopy (../bin) ahead of Apple's. Here, after your startup files,
+# because macOS's path_helper puts /usr/bin back in front of anything before.
+path=("${__miks_zdotdir:h}/bin" $path)
+
 # Marks around each command (OSC 133, as Ghostty, iTerm and VS Code read
 # them): A where a prompt starts, C where a command's output starts, D where
 # it ends. "Select last command" (⌘⇧A) goes by them.

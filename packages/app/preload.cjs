@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld("miks", {
   openRemote: (id) => ipcRenderer.send("miks:openRemote", id),
   /** A native confirmation on this window; resolves true for its button. */
   confirm: (options) => ipcRenderer.invoke("miks:confirm", options),
+  /** Puts text on this Mac's clipboard (a program asked, by OSC 52). */
+  copy: (text) => ipcRenderer.send("miks:copy", text),
   /** Brings this window forward (a notification was clicked). */
   focus: () => ipcRenderer.send("miks:focus"),
   /** The path of a dropped file; File.path no longer exists in Electron. */

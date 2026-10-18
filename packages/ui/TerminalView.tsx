@@ -10,6 +10,7 @@ import { styled } from "styled-components";
 import { daemon, isRemote } from "./daemon";
 import { getSettings, useSettings } from "./settings";
 import { trackCommands } from "./commandMarks";
+import { handleClipboardWrites } from "./osc52";
 import { handleWheel } from "./wheel";
 
 /**
@@ -54,6 +55,7 @@ export function TerminalView({
     terminal.loadAddon(new WebLinksAddon((_event, uri) => window.open(uri)));
     terminal.open(containerRef.current!);
     const wheel = handleWheel(terminal, (data) => daemon.send({ type: "input", tabId, data }));
+    handleClipboardWrites(terminal, (text) => window.miks?.copy(text));
 
     const unstream = daemon.stream(tabId, (event) => {
       if (event.type === "snapshot") {

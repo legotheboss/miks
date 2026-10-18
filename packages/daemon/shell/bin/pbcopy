@@ -1,0 +1,16 @@
+#!/bin/sh
+# Miks's pbcopy, first on PATH in its zsh tabs: copies as Apple's does, then
+# also asks the terminal to (OSC 52), so a Miks window on another Mac puts it
+# on that Mac's clipboard too. Claude Code copies a selection with pbcopy.
+
+# Keep trailing newlines, which $(...) would strip.
+data=$(cat; printf x)
+data=${data%x}
+
+printf '%s' "$data" | "${MIKS_REAL_PBCOPY:-/usr/bin/pbcopy}" "$@"
+status=$?
+
+# Without a terminal (a script's pbcopy), there's nobody to ask.
+printf '\033]52;c;%s\007' "$(printf '%s' "$data" | base64 | tr -d '\n')" 2>/dev/null >/dev/tty
+
+exit $status

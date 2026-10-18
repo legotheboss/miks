@@ -23,6 +23,7 @@ export type MiksBridge = {
   onTarget(listener: (target: Target | null) => void): Unsubscribe;
   openRemote(id: string): void;
   confirm(options: { message: string; detail: string; button: string }): Promise<boolean>;
+  copy(text: string): void;
 };
 
 /** Another Mac a window's daemon is on. */

@@ -1,5 +1,5 @@
 import { spawn } from "child_process";
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, screen, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, screen, shell } from "electron";
 import type { MenuItemConstructorOptions, WebContents } from "electron";
 import fs from "fs";
 import http from "http";
@@ -390,6 +390,10 @@ ipcMain.handle("miks:confirm", async (event, { message, detail, button }: { mess
   const options = { type: "warning" as const, message, detail, buttons: [button, "Cancel"], defaultId: 0, cancelId: 1 };
   const { response } = window ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options);
   return response === 0;
+});
+
+ipcMain.on("miks:copy", (_event, text: string) => {
+  if (typeof text === "string") clipboard.writeText(text);
 });
 
 // A notification was clicked: bring its window forward.

@@ -134,6 +134,12 @@ resizes); keep it passing.
   cursor's line counts as a prompt. Clear to start (⌘K) clears the UI's
   terminal and, by a `clear` message, the daemon's, or the next attach would
   bring it back.
+- Copying reaches the Mac you're at: Miks's zsh puts `shell/bin` first on
+  PATH (in `.zshrc`, after yours, since macOS's `path_helper` reorders PATH
+  in `/etc/zprofile`), whose `pbcopy` runs Apple's and also sends OSC 52, and
+  every window writes OSC 52 to its own Mac's clipboard (`ui/osc52.ts`; reads
+  are never answered). Claude Code copies a selection with plain `pbcopy`.
+  Tests set `MIKS_REAL_PBCOPY` so they never touch the real clipboard.
 - Only attached clients answer terminal queries (the headless emulator's
   replies are dropped, as in VS Code), so each query gets one answer.
 - Panes strip `CMUX_*`, `GHOSTTY_*`, `TERM_PROGRAM*`, `CLAUDE*`,

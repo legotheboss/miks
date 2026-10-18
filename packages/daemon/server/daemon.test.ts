@@ -447,6 +447,33 @@ test("closing the last workspace starts a new one", async () => {
   });
 });
 
+test("pbcopy in a zsh tab also copies through the terminal, for windows on other Macs", async () => {
+  fs.writeFileSync(path.join(home, ".zshrc"), "PS1='%% '\n");
+  const copied = path.join(home, "copied");
+  // Apple's pbcopy would be the real clipboard; this stands in for it.
+  const fake = path.join(home, "fake-pbcopy");
+  fs.writeFileSync(fake, `#!/bin/sh\ncat > '${copied}'\n`, { mode: 0o755 });
+
+  const pane = new Pane({
+    id: "zsh",
+    cwd: home,
+    env: { HOME: home, MIKS_REAL_PBCOPY: fake },
+    command: ["/bin/zsh", "-l"],
+  });
+  let output = "";
+  pane.attach({ snapshot: () => {}, output: (data) => (output += data) });
+  try {
+    await waitFor(() => output.includes("\x1b]133;A\x07"));
+    pane.write("printf 'two\\nlines\\n' | pbcopy\n");
+    const osc52 = `\x1b]52;c;${Buffer.from("two\nlines\n").toString("base64")}\x07`;
+    await waitFor(() => output.includes(osc52));
+    // Still copied the usual way too, trailing newline and all.
+    expect(fs.readFileSync(copied, "utf8")).toBe("two\nlines\n");
+  } finally {
+    pane.kill();
+  }
+});
+
 test("programs that set mode 2031 hear when the appearance changes", async () => {
   daemon.workspaces.createWorkspace({ cwd: home });
   const tabId = activeTab(daemon.workspaces.getState());
