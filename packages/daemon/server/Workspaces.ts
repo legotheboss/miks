@@ -41,6 +41,8 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
   /** Each tab's shell's directory, as of the last `pollCwds`. */
   private readonly cwds = new Map<string, string>();
   private dark = true;
+  /** Set by killAll: panes exiting now aren't to be replaced. */
+  private stopping = false;
 
   private readonly socketPath: string;
   private readonly command?: string[];
@@ -379,6 +381,7 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
 
   /** Ends every pane. For tests; the real daemon just exits. */
   killAll() {
+    this.stopping = true;
     for (const pane of this.panes.values()) pane.kill();
   }
 
@@ -422,6 +425,9 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     if (this.activeWorkspaceId === workspaceId) {
       this.activeWorkspaceId = this.workspaces[Math.min(index, this.workspaces.length - 1)]?.id ?? null;
     }
+
+    // Nothing to see in no workspaces at all, so closing the last starts afresh.
+    if (this.workspaces.length === 0 && !this.stopping) this.createWorkspace();
   }
 
   private findWorkspace(workspaceId: string): WorkspaceRecord | undefined {

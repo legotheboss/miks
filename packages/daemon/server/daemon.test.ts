@@ -431,6 +431,17 @@ test("in zsh, ⌥← moves back a word", async () => {
   }
 });
 
+test("closing the last workspace starts a new one", async () => {
+  daemon.workspaces.createWorkspace({ cwd: home });
+  const first = daemon.workspaces.getState().workspaces[0].id;
+
+  daemon.workspaces.closeWorkspace(first);
+  await waitFor(() => {
+    const { workspaces, activeWorkspaceId } = daemon.workspaces.getState();
+    return workspaces.length === 1 && workspaces[0].id !== first && activeWorkspaceId === workspaces[0].id;
+  });
+});
+
 test("programs that set mode 2031 hear when the appearance changes", async () => {
   daemon.workspaces.createWorkspace({ cwd: home });
   const tabId = activeTab(daemon.workspaces.getState());

@@ -1,4 +1,5 @@
 import { colors } from "crosswing/colors";
+import { Button } from "crosswing/components/Button";
 import { PanelLayout } from "crosswing/components/PanelLayout";
 import { fonts } from "crosswing/fonts";
 import { useMatchMedia } from "crosswing/hooks/useMatchMedia";
@@ -103,7 +104,8 @@ export function App() {
             )}
             {!activeWorkspace && (
               <div className="empty">
-                <button onClick={() => daemon.send({ type: "createWorkspace" })}>New workspace</button>
+                {/* Only for a daemon from before it replaced the last workspace itself. */}
+                <Button newStyle bordered onClick={() => daemon.send({ type: "createWorkspace" })} children="New workspace" />
               </div>
             )}
           </div>
