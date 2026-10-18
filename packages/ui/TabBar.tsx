@@ -4,6 +4,7 @@ import { Plus, X } from "lucide-react";
 import type { Tab, Workspace } from "miks/shared/protocol";
 import { Fragment, HTMLAttributes } from "react";
 import { styled } from "styled-components";
+import { closeTab } from "./closing";
 import { daemon } from "./daemon";
 import { useDraggable } from "crosswing/components/draggable/useDraggable";
 import { dropIndex } from "./Sidebar";
@@ -94,7 +95,7 @@ function TabView({ tab, workspaceId, active }: { tab: Tab; workspaceId: string; 
       data-draggable-group={DRAG_GROUP}
       data-active={active}
       onClick={() => daemon.send({ type: "select", workspaceId, tabId: tab.id })}
-      onAuxClick={(event) => event.button === 1 && daemon.send({ type: "closeTab", tabId: tab.id })}
+      onAuxClick={(event) => event.button === 1 && closeTab(tab)}
     >
       <div className="box">
         {tab.agent && <StatusDot status={tab.agent.status} />}
@@ -106,7 +107,7 @@ function TabView({ tab, workspaceId, active }: { tab: Tab; workspaceId: string; 
           onMouseDown={(event) => event.stopPropagation()}
           onClick={(event) => {
             event.stopPropagation();
-            daemon.send({ type: "closeTab", tabId: tab.id });
+            closeTab(tab);
           }}
         >
           <X />

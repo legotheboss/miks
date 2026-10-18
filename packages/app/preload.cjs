@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld("miks", {
   onTarget: (listener) => subscribe("miks:target", listener),
   /** Opens (or brings forward) the window on a remote from Settings. */
   openRemote: (id) => ipcRenderer.send("miks:openRemote", id),
+  /** A native confirmation on this window; resolves true for its button. */
+  confirm: (options) => ipcRenderer.invoke("miks:confirm", options),
   /** Brings this window forward (a notification was clicked). */
   focus: () => ipcRenderer.send("miks:focus"),
   /** The path of a dropped file; File.path no longer exists in Electron. */

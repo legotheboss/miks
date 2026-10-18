@@ -383,6 +383,15 @@ nativeTheme.on("updated", () => {
   for (const window of BrowserWindow.getAllWindows()) window.setBackgroundColor(windowBackground());
 });
 
+// The page asks before doing something it can't undo (closing a tab with a
+// program running in it): a native sheet, like the quit warning.
+ipcMain.handle("miks:confirm", async (event, { message, detail, button }: { message: string; detail: string; button: string }) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  const options = { type: "warning" as const, message, detail, buttons: [button, "Cancel"], defaultId: 0, cancelId: 1 };
+  const { response } = window ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options);
+  return response === 0;
+});
+
 // A notification was clicked: bring its window forward.
 ipcMain.on("miks:focus", (event) => {
   const window = BrowserWindow.fromWebContents(event.sender);
@@ -552,7 +561,10 @@ function buildMenu() {
         command("newWorkspace", "CmdOrCtrl+N", "New workspace"),
         { type: "separator" },
         command("closeTab", "CmdOrCtrl+W", "Close tab"),
-        command("closeWorkspace", "CmdOrCtrl+Shift+W", "Close workspace"),
+        // Out of the way: ⌘⇧W closes the window, as everywhere else on a Mac,
+        // and a workspace is a lot to lose by a slip.
+        command("closeWorkspace", "CmdOrCtrl+Alt+Shift+W", "Close workspace"),
+        { role: "close", label: "Close window", accelerator: "CmdOrCtrl+Shift+W" },
       ],
     },
     {

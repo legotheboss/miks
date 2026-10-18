@@ -357,6 +357,11 @@ test("a program in front of the shell is reported as running", async () => {
 
   daemon.workspaces.getPane(tabId)!.write("sleep 30\n");
   await waitFor(() => daemon.workspaces.running()[0]?.program === "sleep");
+  // And on its tab, for asking before closing it.
+  await waitFor(() => {
+    daemon.workspaces.pollForeground();
+    return daemon.workspaces.getState().workspaces[0].tabs[0].running === "sleep";
+  });
 });
 
 test("a new tab starts where the current one is", async () => {

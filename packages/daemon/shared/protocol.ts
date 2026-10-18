@@ -35,6 +35,8 @@ export type Tab = {
   /** Where the tab's shell is, checked every couple of seconds. */
   cwd: string | null;
   agent: AgentState | null;
+  /** The program in front of the tab's shell, which closing it would stop; missing before protocol 2. */
+  running?: string | null;
 };
 
 export type Workspace = {

@@ -391,6 +391,7 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
       title: this.panes.get(id)?.displayTitle ?? "",
       cwd: this.cwds.get(id) ?? null,
       agent: this.agents.get(id) ?? null,
+      running: this.panes.get(id)?.running() ?? null,
     };
   }
 

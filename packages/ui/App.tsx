@@ -8,6 +8,7 @@ import { type AgentStatus, type DaemonState, PROTOCOL_VERSION } from "miks/share
 import { DEFAULT_SETTINGS } from "miks/shared/settings";
 import { useEffect, useRef } from "react";
 import { styled } from "styled-components";
+import { closeTab, closeWorkspace } from "./closing";
 import { daemon, type Target, useDaemon, useTarget } from "./daemon";
 import { getSettings, setFontSize, updateSettings, useSettings } from "./settings";
 import { Sidebar } from "./Sidebar";
@@ -285,11 +286,13 @@ function runCommand(command: string) {
       return;
     case "newWorkspace":
       return daemon.send({ type: "createWorkspace" });
-    case "closeTab":
-      if (workspace?.activeTabId) daemon.send({ type: "closeTab", tabId: workspace.activeTabId });
+    case "closeTab": {
+      const tab = tabs[tabIndex];
+      if (tab) closeTab(tab);
       return;
+    }
     case "closeWorkspace":
-      if (workspace) daemon.send({ type: "closeWorkspace", workspaceId: workspace.id });
+      if (workspace) closeWorkspace(workspace);
       return;
     case "nextTab":
       return selectTab(1);
