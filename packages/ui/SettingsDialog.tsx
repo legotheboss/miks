@@ -11,6 +11,7 @@ import { Plus, X } from "lucide-react";
 import type { Remote } from "miks/shared/settings";
 import { styled } from "styled-components";
 import { useEffect, useState } from "react";
+import { useTarget } from "./daemon";
 import { updateSettings, useSettings } from "./settings";
 import { focusActiveTerminal } from "./TerminalView";
 
@@ -31,8 +32,12 @@ export function SettingsDialog({ initialTab = "general", onClose }: { initialTab
     return () => focusActiveTerminal();
   }, []);
 
+  const target = useTarget();
+
   return (
     <DialogView title="Settings" onClose={onClose} form={false}>
+      {/* This window is on another Mac, but its window, keys and notifications are this one's. */}
+      {target && <StyledNote>Settings for this Mac. {target.name}'s are in Miks there.</StyledNote>}
       <StyledSettings layout="grow" pad={false} value={tab} onValueChange={setTab}>
         <TabbedButton title="General" value="general">
           <GeneralSettings />
@@ -50,42 +55,15 @@ export function SettingsDialog({ initialTab = "general", onClose }: { initialTab
 
 function GeneralSettings() {
   const settings = useSettings();
-  const pathPrefix = useInputValue({
-    initialValue: settings.hidePathPrefix || null,
-    onValueChange: (_value, text) => updateSettings({ hidePathPrefix: text }),
-  });
 
   return (
     <SeparatorLayout bordered>
-      {/* Laid out like the toggles below it, with the field where a switch is. */}
-      <label className="field">
-        <div className="content">
-          <div className="label">Hide path prefix</div>
-          <div className="detail">Left off directories in the sidebar, so ~/Code/sage shows as sage.</div>
-        </div>
-        <TextInput newStyle placeholder="~/Code/" {...pathPrefix.props} />
-      </label>
       <LabeledToggle
         label="Notifications"
         detail="When an agent finishes or needs you, unless you're looking at it."
         on={settings.notifications}
         onClick={() => updateSettings({ notifications: !settings.notifications })}
       />
-      <LabeledToggle
-        label="Option as Meta"
-        detail="⌥ with a key sends Escape and the key, as shell shortcuts expect, instead of typing a character like å."
-        on={settings.optionAsMeta}
-        onClick={() => updateSettings({ optionAsMeta: !settings.optionAsMeta })}
-      />
-    </SeparatorLayout>
-  );
-}
-
-function AdvancedSettings() {
-  const settings = useSettings();
-
-  return (
-    <SeparatorLayout bordered>
       <LabeledToggle
         label="Claude Code status"
         detail="Adds hooks to ~/.claude/settings.json that tell Miks what Claude is up to. Outside Miks they do nothing."
@@ -98,6 +76,33 @@ function AdvancedSettings() {
         on={settings.keepDaemonRunning}
         onClick={() => updateSettings({ keepDaemonRunning: !settings.keepDaemonRunning })}
       />
+    </SeparatorLayout>
+  );
+}
+
+function AdvancedSettings() {
+  const settings = useSettings();
+  const pathPrefix = useInputValue({
+    initialValue: settings.hidePathPrefix || null,
+    onValueChange: (_value, text) => updateSettings({ hidePathPrefix: text }),
+  });
+
+  return (
+    <SeparatorLayout bordered>
+      <LabeledToggle
+        label="Option as Meta"
+        detail="⌥ with a key sends Escape and the key, as shell shortcuts expect, instead of typing a character like å."
+        on={settings.optionAsMeta}
+        onClick={() => updateSettings({ optionAsMeta: !settings.optionAsMeta })}
+      />
+      {/* Laid out like the toggle above it, with the field where a switch is. */}
+      <label className="field">
+        <div className="content">
+          <div className="label">Hide path prefix</div>
+          <div className="detail">Left off directories in the sidebar, so ~/Code/sage shows as sage.</div>
+        </div>
+        <TextInput newStyle placeholder="~/Code/" {...pathPrefix.props} />
+      </label>
     </SeparatorLayout>
   );
 }
@@ -173,7 +178,7 @@ function RemoteSettings() {
           ))}
         </SeparatorLayout>
       )}
-      <Button newStyle className="add" icon={<Plus />} onClick={add} children="Add a Mac" />
+      <Button newStyle bordered className="add" icon={<Plus />} onClick={add} children="Add a Mac" />
     </StyledRemotes>
   );
 }
@@ -237,6 +242,12 @@ const StyledRemotes = styled.div`
   > .add {
     align-self: flex-start;
   }
+`;
+
+const StyledNote = styled.p`
+  margin: 0 0 12px;
+  color: ${colors.textSecondary()};
+  font: ${fonts.display({ size: 13, line: "18px" })};
 `;
 
 const StyledSettings = styled(TabbedButtonLayout)`

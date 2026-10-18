@@ -414,6 +414,23 @@ test("a file dropped on another Mac's window is saved here, and its path sent ba
   client.close();
 });
 
+test("in zsh, ⌥← moves back a word", async () => {
+  fs.writeFileSync(path.join(home, ".zshrc"), "PS1='%% '\n");
+  const pane = new Pane({ id: "zsh", cwd: home, env: { HOME: home }, command: ["/bin/zsh", "-l"] });
+  let output = "";
+  pane.attach({ snapshot: () => {}, output: (data) => (output += data) });
+  try {
+    await waitFor(() => output.includes("\x1b]133;A\x07"));
+    // What xterm.js sends for ⌥← with Option as Meta.
+    pane.write("echo one two");
+    pane.write("\x1b[1;3D");
+    pane.write("X\n");
+    await waitFor(() => output.includes("one Xtwo\r\n"));
+  } finally {
+    pane.kill();
+  }
+});
+
 test("programs that set mode 2031 hear when the appearance changes", async () => {
   daemon.workspaces.createWorkspace({ cwd: home });
   const tabId = activeTab(daemon.workspaces.getState());

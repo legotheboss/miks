@@ -22,5 +22,13 @@ autoload -Uz add-zsh-hook
 add-zsh-hook precmd __miks_precmd
 add-zsh-hook preexec __miks_preexec
 
+# ⌥←/→ by word. With Option as Meta, Miks sends them as xterm does
+# (ESC [1;3D), which zsh leaves unbound; Terminal.app's ESC b/f already are.
+# Yours win: only keys you haven't bound.
+for __miks_key __miks_widget in '^[[1;3D' backward-word '^[[1;3C' forward-word; do
+  [[ $(bindkey -- $__miks_key) == *undefined-key ]] && bindkey -- $__miks_key $__miks_widget
+done
+unset __miks_key __miks_widget
+
 # Without -l there's no .zlogin to come.
 [[ -o login ]] || __miks_restore_zdotdir
