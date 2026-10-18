@@ -3,26 +3,36 @@ import { PanelLayout } from "crosswing/components/PanelLayout";
 import { fonts } from "crosswing/fonts";
 import { useMatchMedia } from "crosswing/hooks/useMatchMedia";
 import { useDialog } from "crosswing/modals/dialog";
-import type { AgentStatus, DaemonState } from "miks/shared/protocol";
+import { type AgentStatus, type DaemonState, PROTOCOL_VERSION } from "miks/shared/protocol";
 import { DEFAULT_SETTINGS } from "miks/shared/settings";
 import { useEffect, useRef } from "react";
 import { styled } from "styled-components";
-import { daemon, useDaemon } from "./daemon";
+import { daemon, type Target, useDaemon, useTarget } from "./daemon";
 import { getSettings, setFontSize, updateSettings, useSettings } from "./settings";
 import { Sidebar } from "./Sidebar";
 import { workspaceTitle } from "./status";
 import { StyledTabBar, TabBar } from "./TabBar";
-import { SettingsDialog } from "./SettingsDialog";
+import { SettingsDialog, type SettingsTab } from "./SettingsDialog";
 import { clearActiveTerminal, selectLastCommand, TERMINAL_BACKGROUND, TerminalView } from "./TerminalView";
 
 export function App() {
-  const { state, connected, error } = useDaemon();
+  const { state, connected, error, retrying } = useDaemon();
   const { sidebarVisible } = useSettings();
+  const target = useTarget();
 
-  const settingsDialog = useDialog(() => <SettingsDialog onClose={settingsDialog.hide} />);
+  const settingsTab = useRef<SettingsTab>("general");
+  const settingsDialog = useDialog(() => (
+    <SettingsDialog initialTab={settingsTab.current} onClose={settingsDialog.hide} />
+  ));
 
   useEffect(() => {
-    const handle = (command: string) => (command === "settings" ? settingsDialog.show() : runCommand(command));
+    const handle = (command: string) => {
+      if (command === "settings" || command === "settingsRemotes") {
+        settingsTab.current = command === "settings" ? "general" : "remotes";
+        return settingsDialog.show();
+      }
+      runCommand(command);
+    };
 
     // In development, `window.miksCommand("newTab")` runs a menu command, for
     // checking them from DevTools (menu shortcuts can't be sent from there).
@@ -39,8 +49,11 @@ export function App() {
       <StyledApp>
         <div className="message">
           <div className="titlebar" />
-          <p>{error ?? "Connecting to the daemon…"}</p>
-          {error && <button onClick={() => daemon.reconnect()}>Start the daemon</button>}
+          {target && <MachineBadge target={target} />}
+          <p>{error ?? (target ? `Connecting to ${target.name}…` : "Connecting to the daemon…")}</p>
+          {error && !retrying && (
+            <button onClick={() => daemon.reconnect()}>{target ? "Try again" : "Start the daemon"}</button>
+          )}
         </div>
       </StyledApp>
     );
@@ -68,7 +81,14 @@ export function App() {
         hideDragHandle
         restorationKey={Sidebar}
       >
-        <div className="main" data-sidebar-visible={sidebarVisible}>
+        <div className="main" data-sidebar-visible={sidebarVisible} data-remote={!!target}>
+          {target && <MachineBadge target={target} />}
+          {(state.protocol ?? 1) !== PROTOCOL_VERSION && (
+            <div className="version-warning">
+              {target ? target.name : "The daemon"} is running a different version of Miks. Update both to the same one;
+              until then, some things may not work.
+            </div>
+          )}
           {activeWorkspace ? <TabBar workspace={activeWorkspace} /> : <div className="empty-bar" />}
           <div className="terminals">
             {/* Every tab's terminal stays mounted, so switching is instant. */}
@@ -110,6 +130,28 @@ export const StyledApp = styled.div`
   .main {
     display: flex;
     flex-flow: column;
+    position: relative;
+
+    /* Room for the badge, top right. */
+    &[data-remote="true"] > ${StyledTabBar}, &[data-remote="true"] > .empty-bar {
+      padding-right: 120px;
+    }
+
+    > .version-warning {
+      order: 1;
+      padding: 6px 12px;
+      font: ${fonts.display({ size: 12 })};
+      background: ${colors.yellow({ alpha: 0.2 })};
+      border-bottom: 1px solid ${colors.separator()};
+    }
+
+    > ${StyledTabBar}, > .empty-bar {
+      order: 0;
+    }
+
+    > .terminals {
+      order: 2;
+    }
 
     /* With the sidebar hidden, the traffic lights sit over the tab bar. */
     &[data-sidebar-visible="false"] > ${StyledTabBar}, &[data-sidebar-visible="false"] > .empty-bar {
@@ -162,6 +204,36 @@ export const StyledApp = styled.div`
   button {
     font: inherit;
   }
+`;
+
+/**
+ * Which Mac this window's terminals are on, top right, in the color you gave
+ * it: a window on another Mac should never pass for this one.
+ */
+function MachineBadge({ target }: { target: Target }) {
+  return (
+    <StyledMachineBadge style={{ background: target.color }} title={`Terminals on ${target.host}, over SSH`}>
+      {target.name}
+    </StyledMachineBadge>
+  );
+}
+
+const StyledMachineBadge = styled.div`
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 10;
+  max-width: 110px;
+  padding: 0 9px;
+  height: 22px;
+  line-height: 22px;
+  border-radius: 11px;
+  color: #fff;
+  font: ${fonts.displayBold({ size: 12, line: "22px" })};
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  -webkit-app-region: drag;
 `;
 
 /**
@@ -261,7 +333,12 @@ function useAppearanceReporting(connected: boolean) {
   const dark = useMatchMedia("(prefers-color-scheme: dark)");
 
   useEffect(() => {
-    if (connected) daemon.send({ type: "appearance", dark });
+    if (!connected) return;
+    const report = () => daemon.send({ type: "appearance", dark });
+    report();
+    // The window you're in decides, when the daemon has one on another Mac too.
+    window.addEventListener("focus", report);
+    return () => window.removeEventListener("focus", report);
   }, [connected, dark]);
 }
 

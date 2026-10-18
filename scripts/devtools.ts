@@ -11,7 +11,9 @@ const PORT = Number(process.env.MIKS_DEVTOOLS_PORT ?? 2739);
 const [command, arg] = process.argv.slice(2);
 
 const targets: any[] = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
-const page = targets.find((t) => t.type === "page");
+// With more than one window, MIKS_DEVTOOLS_PAGE=<n> picks which (in the
+// order DevTools lists them).
+const page = targets.filter((t) => t.type === "page")[Number(process.env.MIKS_DEVTOOLS_PAGE ?? 0)];
 if (!page) throw new Error("No page found; is `yarn dev` running?");
 
 const socket = new WebSocket(page.webSocketDebuggerUrl);

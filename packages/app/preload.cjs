@@ -13,7 +13,12 @@ contextBridge.exposeInMainWorld("miks", {
   getSettings: () => ipcRenderer.sendSync("miks:getSettings"),
   setSettings: (changes) => ipcRenderer.send("miks:setSettings", changes),
   onSettings: (listener) => subscribe("miks:settings", listener),
-  /** Brings the main window forward (a notification was clicked). */
+  /** The Mac this window's daemon is on: null for this one, else { name, color, host }. */
+  getTarget: () => ipcRenderer.sendSync("miks:getTarget"),
+  onTarget: (listener) => subscribe("miks:target", listener),
+  /** Opens (or brings forward) the window on a remote from Settings. */
+  openRemote: (id) => ipcRenderer.send("miks:openRemote", id),
+  /** Brings this window forward (a notification was clicked). */
   focus: () => ipcRenderer.send("miks:focus"),
   /** The path of a dropped file; File.path no longer exists in Electron. */
   pathForFile: (file) => webUtils.getPathForFile(file),

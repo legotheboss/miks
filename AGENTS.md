@@ -63,6 +63,18 @@ Never SIGTERM a Miks UI; that's an ordinary quit.
   kept running ("Keep terminals running") is left on the old one.
   `MIKS_UPDATE_FEED` points a packaged copy at a test feed; verified that way
   against a local `python3 -m http.server`.
+- Remote windows (Settings → Remotes; File → Open window on): a window on
+  another Mac's daemon through `ssh -N -L <local sock>:<remote sock>`
+  (`packages/app/tunnels.ts`), so no daemon ever listens on the network. One
+  window per daemon; each window's machine is in `windowRemotes`, and every
+  daemon call must go to it. A remote window never starts, stops or restarts
+  a daemon: quitting stops only this Mac's. It retries every 3s on its own.
+  Dropped files upload (`upload` → `uploaded`, saved in the daemon's tmpdir).
+  Focusing a window re-sends its size and appearance, so the Mac you're at
+  wins. Open remote windows reopen at launch (`UI/remote-windows.json`).
+  `PROTOCOL_VERSION` warns when two Miks disagree. Test without another Mac:
+  `MIKS_SSH=scripts/fake-ssh.ts FAKE_SSH_HOME=/tmp/fh`, with a second daemon
+  at `MIKS_HOME="/tmp/fh/Library/Application Support/Miks"`.
 - Miks keeps its Claude Code hooks in `~/.claude/settings.json` itself
   (`packages/app/claudeHooks.ts`, on launch and when the setting changes),
   running a copy of the script in Miks's home so the path is the same for

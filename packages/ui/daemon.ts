@@ -12,14 +12,20 @@ export type MiksBridge = {
   connect(): void;
   send(message: string): void;
   onMessage(listener: (message: string) => void): Unsubscribe;
-  onStatus(listener: (status: { connected: boolean; error?: string }) => void): Unsubscribe;
+  onStatus(listener: (status: { connected: boolean; error?: string; retrying?: boolean }) => void): Unsubscribe;
   onCommand(listener: (command: string) => void): Unsubscribe;
   pathForFile(file: File): string;
   getSettings(): Settings;
   setSettings(changes: Partial<Settings>): void;
   onSettings(listener: (settings: Settings) => void): Unsubscribe;
   focus(): void;
+  getTarget(): Target | null;
+  onTarget(listener: (target: Target | null) => void): Unsubscribe;
+  openRemote(id: string): void;
 };
+
+/** Another Mac a window's daemon is on. */
+export type Target = { name: string; color: string; host: string };
 
 declare global {
   interface Window {
@@ -31,6 +37,8 @@ export type DaemonSnapshot = {
   state: DaemonState | null;
   connected: boolean;
   error: string | null;
+  /** Whether it's trying again on its own (a remote window does). */
+  retrying: boolean;
 };
 
 export type PaneStreamEvent =
@@ -38,9 +46,10 @@ export type PaneStreamEvent =
   | { type: "output"; data: string };
 
 class DaemonClient {
-  private snapshot: DaemonSnapshot = { state: null, connected: false, error: null };
+  private snapshot: DaemonSnapshot = { state: null, connected: false, error: null, retrying: false };
   private readonly listeners = new Set<() => void>();
   private readonly streams = new Map<string, (event: PaneStreamEvent) => void>();
+  private readonly uploads = new Map<string, ((path: string | null) => void)[]>();
   private readonly connectListeners = new Set<() => void>();
   private readonly commandListeners = new Set<(command: string) => void>();
   private readonly bridge: MiksBridge | undefined = window.miks;
@@ -51,13 +60,13 @@ class DaemonClient {
       return;
     }
 
-    this.bridge.onStatus(({ connected, error }) => {
+    this.bridge.onStatus(({ connected, error, retrying = false }) => {
       if (!connected) {
-        this.update({ connected, error: error ?? "The daemon stopped, taking its terminals with it." });
+        this.update({ connected, retrying, error: error ?? "The daemon stopped, taking its terminals with it." });
         return;
       }
 
-      this.update({ connected, error: null });
+      this.update({ connected, retrying: false, error: null });
 
       this.send({ type: "hello" });
       for (const listener of this.connectListeners) listener();
@@ -87,6 +96,19 @@ class DaemonClient {
     return () => {
       if (this.streams.get(tabId) === handler) this.streams.delete(tabId);
     };
+  }
+
+  /**
+   * Sends a file to the daemon's Mac (a window on another Mac can't use this
+   * one's paths) and resolves with where it was saved there.
+   */
+  upload(tabId: string, name: string, data: string): Promise<string | null> {
+    if (!this.snapshot.connected) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      // Replies come in order, per tab.
+      this.uploads.set(tabId, [...(this.uploads.get(tabId) ?? []), resolve]);
+      this.send({ type: "upload", tabId, name, data });
+    });
   }
 
   /** Called on every (re)connection, which is when terminals must attach. */
@@ -125,6 +147,8 @@ class DaemonClient {
     switch (message.type) {
       case "state":
         return this.update({ state: message.state });
+      case "uploaded":
+        return this.uploads.get(message.tabId)?.shift()?.(message.path);
       case "snapshot":
       case "output": {
         const { tabId, ...event } = message;
@@ -135,6 +159,24 @@ class DaemonClient {
 }
 
 export const daemon = new DaemonClient();
+
+/** The Mac this window is on, if not this one: what the badge shows. */
+export function useTarget(): Target | null {
+  return useSyncExternalStore(subscribeTarget, getTarget);
+}
+
+let target: Target | null = window.miks?.getTarget?.() ?? null;
+const targetListeners = new Set<() => void>();
+window.miks?.onTarget?.((next) => {
+  target = next;
+  for (const listener of targetListeners) listener();
+});
+const getTarget = () => target;
+const subscribeTarget = (listener: () => void) => {
+  targetListeners.add(listener);
+  return () => targetListeners.delete(listener);
+};
+export const isRemote = () => target !== null;
 
 export function useDaemon(): DaemonSnapshot {
   return useSyncExternalStore(daemon.subscribe, daemon.getSnapshot);

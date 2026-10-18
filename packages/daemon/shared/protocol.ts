@@ -3,6 +3,12 @@
 // This file is the only edge between the daemon and the UI.
 
 /**
+ * Bumped when a message changes shape or appears, so a UI talking to another
+ * Mac's daemon can tell it's a different Miks. Before 2 there was none.
+ */
+export const PROTOCOL_VERSION = 2;
+
+/**
  * What a coding agent in a pane is up to, as reported by its hooks.
  *
  * - `working`: busy on a prompt.
@@ -41,6 +47,8 @@ export type Workspace = {
 };
 
 export type DaemonState = {
+  /** The daemon's PROTOCOL_VERSION; missing before 2. */
+  protocol?: number;
   /** The daemon's home directory, for showing paths with `~`. */
   home: string;
   workspaces: Workspace[];
@@ -77,6 +85,11 @@ export type ClientMessage =
    */
   | { type: "attach"; tabId: string; cols?: number; rows?: number }
   | { type: "detach"; tabId: string }
+  /**
+   * A file dropped on a window on another Mac, which can't see the dropper's
+   * paths: the daemon saves it and answers `uploaded` with where.
+   */
+  | { type: "upload"; tabId: string; name: string; data: string }
   /** The UI cleared its terminal (⌘K); the daemon's copy follows. */
   | { type: "clear"; tabId: string }
   | { type: "input"; tabId: string; data: string }
@@ -90,6 +103,8 @@ export type DaemonMessage =
   | { type: "state"; state: DaemonState }
   /** The pane's screen and scrollback as VT sequences, to write into a fresh terminal. */
   | { type: "snapshot"; tabId: string; data: string; cols: number; rows: number }
-  | { type: "output"; tabId: string; data: string };
+  | { type: "output"; tabId: string; data: string }
+  /** Where an `upload` landed, on the daemon's Mac; null if it couldn't be saved. */
+  | { type: "uploaded"; tabId: string; path: string | null };
 
 // A pane whose program exits simply disappears from the next `state`.

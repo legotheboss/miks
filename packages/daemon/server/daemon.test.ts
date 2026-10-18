@@ -397,6 +397,23 @@ test("zsh reads your startup files, gives ZDOTDIR back, and marks each command",
   }
 });
 
+test("a file dropped on another Mac's window is saved here, and its path sent back", async () => {
+  daemon.workspaces.createWorkspace({ cwd: home });
+  const client = await connect();
+  const tabId = activeTab(await client.state());
+
+  client.send({ type: "upload", tabId, name: "../screen shot.png", data: Buffer.from("PNG!").toString("base64") });
+  const reply = await client.next((message) => message.type === "uploaded");
+
+  expect(reply).toMatchObject({ type: "uploaded", tabId });
+  const saved = (reply as any).path as string;
+  // Only the name survives, never a path out of the folder.
+  expect(path.basename(saved)).toBe("screen shot.png");
+  expect(fs.readFileSync(saved, "utf8")).toBe("PNG!");
+  fs.rmSync(path.dirname(saved), { recursive: true });
+  client.close();
+});
+
 test("programs that set mode 2031 hear when the appearance changes", async () => {
   daemon.workspaces.createWorkspace({ cwd: home });
   const tabId = activeTab(daemon.workspaces.getState());
@@ -537,6 +554,7 @@ async function connect() {
   return {
     send: (message: ClientMessage) => socket.send(JSON.stringify(message)),
     close: () => socket.close(),
+    next: (match: (message: DaemonMessage) => boolean) => until(() => messages.find(match)),
     state: async () => {
       socket.send(JSON.stringify({ type: "hello" } satisfies ClientMessage));
       const message = await until(() => messages.findLast((m) => m.type === "state"));

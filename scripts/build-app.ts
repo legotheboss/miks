@@ -45,6 +45,7 @@ export async function buildApp(): Promise<string> {
   copy("packages/app/main.ts");
   copy("packages/app/claudeHooks.ts");
   copy("packages/app/updates.ts");
+  copy("packages/app/tunnels.ts");
   copy("packages/daemon/hooks");
   copy("packages/daemon/shell");
   copy("packages/app/preload.cjs");

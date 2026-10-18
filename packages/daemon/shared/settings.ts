@@ -1,6 +1,17 @@
 // The app's preferences, kept by the Electron main process in settings.json
 // and shared by every window (packages/app/main.ts).
 
+/** Another Mac whose daemon Miks can open a window on, over SSH. */
+export type Remote = {
+  id: string;
+  /** What the window's badge says. */
+  name: string;
+  /** What `ssh` connects to: a host, or a Host from ~/.ssh/config. */
+  host: string;
+  /** The badge's color, as CSS. */
+  color: string;
+};
+
 export type Settings = {
   /** Terminal text size, in points. */
   fontSize: number;
@@ -16,6 +27,7 @@ export type Settings = {
   claudeHooks: boolean;
   /** Whether Option sends Meta (⌥A as Escape-A, for zsh bindings) instead of typing å. */
   optionAsMeta: boolean;
+  remotes: Remote[];
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -26,6 +38,7 @@ export const DEFAULT_SETTINGS: Settings = {
   keepDaemonRunning: false,
   claudeHooks: true,
   optionAsMeta: true,
+  remotes: [],
 };
 
 /**

@@ -3,7 +3,7 @@ import { randomUUID } from "crypto";
 import { EventEmitter } from "events";
 import fs from "fs";
 import os from "os";
-import type { AgentState, DaemonState, Tab } from "../shared/protocol.ts";
+import { type AgentState, type DaemonState, PROTOCOL_VERSION, type Tab } from "../shared/protocol.ts";
 import { Pane } from "./Pane.ts";
 
 /** What survives a daemon restart, in `state.json`. */
@@ -64,6 +64,7 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
 
   getState(): DaemonState {
     return {
+      protocol: PROTOCOL_VERSION,
       home: os.homedir(),
       activeWorkspaceId: this.activeWorkspaceId,
       workspaces: this.workspaces.map((workspace) => ({

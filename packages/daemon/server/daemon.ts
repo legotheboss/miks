@@ -1,6 +1,7 @@
 import fs from "fs";
 import http from "http";
 import net from "net";
+import os from "os";
 import path from "path";
 import { WebSocket, WebSocketServer } from "ws";
 import type { ClientMessage, DaemonMessage } from "../shared/protocol.ts";
@@ -175,6 +176,8 @@ export async function serve({
         }
         case "input":
           return workspaces.getPane(message.tabId)?.write(message.data);
+        case "upload":
+          return send({ type: "uploaded", tabId: message.tabId, path: saveUpload(message.name, message.data) });
         case "clear":
           return workspaces.getPane(message.tabId)?.clear();
         case "resize":
@@ -252,6 +255,22 @@ function persist(workspaces: Workspaces, statePath: string) {
       write(state);
     },
   };
+}
+
+/**
+ * Saves a file dropped on a window on another Mac, under its own name in a
+ * folder of its own (so two drops of "image.png" don't collide), in the
+ * temporary folder macOS clears out on its own. Returns where, or null.
+ */
+function saveUpload(name: string, data: string): string | null {
+  try {
+    const folder = fs.mkdtempSync(path.join(os.tmpdir(), "miks-drop-"));
+    const file = path.join(folder, path.basename(name) || "file");
+    fs.writeFileSync(file, Buffer.from(data, "base64"));
+    return file;
+  } catch {
+    return null;
+  }
 }
 
 function readSavedState(statePath: string): SavedState | null {

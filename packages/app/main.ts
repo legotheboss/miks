@@ -6,16 +6,18 @@ import http from "http";
 import path from "path";
 import { connectDaemon as openDaemonSocket } from "miks/shared/connect";
 import { logPath, miksHome, socketPath } from "miks/shared/paths";
-import { DEFAULT_SETTINGS, displayPath, type Settings } from "miks/shared/settings";
+import { DEFAULT_SETTINGS, displayPath, type Remote, type Settings } from "miks/shared/settings";
 import os from "os";
 import type { WebSocket } from "ws";
 import { syncClaudeHooks } from "./claudeHooks.ts";
+import { stopAllTunnels, stopTunnel, tunnelSocket } from "./tunnels.ts";
 import { checkForUpdates, startUpdates } from "./updates.ts";
 
-// The Electron shell is deliberately thin: a window, a menu, and a pipe
-// between the renderer and the daemon's Unix socket (which the renderer
-// can't open itself). Every terminal lives in the daemon, so quitting this
-// app, or reloading its window, leaves them all running.
+// The Electron shell is deliberately thin: windows, a menu, and a pipe
+// between each window and a daemon's Unix socket (which the renderer can't
+// open itself). Every terminal lives in a daemon, so reloading a window leaves
+// them all running. A window is on this Mac's daemon, or on a remote's,
+// through an SSH tunnel (tunnels.ts); one window per daemon.
 
 // The repo in development; Contents/Resources/app inside Miks.app.
 const root = path.resolve(import.meta.dirname, "../..");
@@ -26,16 +28,28 @@ const iconPath = path.join(root, "packages/app/icon/icon.png");
 // The daemon.
 //
 
-function connectOnce(): Promise<WebSocket> {
+function connectOnce(socketFile = socketPath()): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
-    const socket = openDaemonSocket(socketPath());
+    const socket = openDaemonSocket(socketFile);
     socket.once("open", () => resolve(socket));
     socket.once("error", reject);
   });
 }
 
-/** Connects to the daemon, starting it first if nothing is listening. */
-async function connectDaemon(): Promise<WebSocket> {
+/**
+ * Connects to this Mac's daemon, starting it first if nothing is listening,
+ * or to a remote's, which is only ever started there.
+ */
+async function connectDaemon(remote: Remote | null): Promise<WebSocket> {
+  if (remote) {
+    const socket = await tunnelSocket(remote);
+    try {
+      return await connectOnce(socket);
+    } catch {
+      throw new Error(`Miks isn't running on ${remote.name}. Open it there, and this window will connect.`);
+    }
+  }
+
   try {
     return await connectOnce();
   } catch {
@@ -96,19 +110,39 @@ function helperPath(): string {
  * (re)loads so the daemon never streams to terminals that no longer exist.
  */
 const links = new Map<WebContents, WebSocket>();
+/** Which remote each window is on, by id; null for this Mac. */
+const windowRemotes = new Map<WebContents, string | null>();
+/** Remote windows try again on their own; this is when, for each. */
+const retries = new Map<WebContents, NodeJS.Timeout>();
+
+const remoteFor = (contents: WebContents): Remote | null => {
+  const id = windowRemotes.get(contents);
+  return (id && settings.remotes.find((remote) => remote.id === id)) || null;
+};
 
 ipcMain.on("miks:connect", (event) => linkWindow(event.sender));
 
 async function linkWindow(contents: WebContents) {
   links.get(contents)?.close();
   links.delete(contents);
+  clearTimeout(retries.get(contents));
+
+  const remote = remoteFor(contents);
+  const retry = (error: string) => {
+    if (contents.isDestroyed()) return;
+    contents.send("miks:status", { connected: false, error, retrying: !!remote });
+    if (remote) retries.set(contents, setTimeout(() => linkWindow(contents), 3000));
+  };
+
+  if (windowRemotes.get(contents) && !remote) {
+    return contents.send("miks:status", { connected: false, error: "This machine was removed in Settings." });
+  }
 
   let socket: WebSocket;
   try {
-    socket = await connectDaemon();
+    socket = await connectDaemon(remote);
   } catch (error) {
-    contents.send("miks:status", { connected: false, error: String(error) });
-    return;
+    return retry(error instanceof Error ? error.message : String(error));
   }
 
   if (contents.isDestroyed()) return socket.close();
@@ -120,18 +154,19 @@ async function linkWindow(contents: WebContents) {
   socket.on("close", () => {
     if (links.get(contents) !== socket) return;
     links.delete(contents);
-    if (!contents.isDestroyed()) contents.send("miks:status", { connected: false });
+    if (remote) retry(`Lost the connection to ${remote.name}. Reconnecting…`);
+    else if (!contents.isDestroyed()) contents.send("miks:status", { connected: false });
   });
 
   contents.send("miks:status", { connected: true });
-  openPendingFolders();
+  if (!remote) openPendingFolders();
 }
 
 ipcMain.on("miks:send", (event, message: string) => {
   links.get(event.sender)?.send(message);
 });
 
-/** A GET against the daemon's HTTP API, or null if it isn't answering. */
+/** A GET against this Mac's daemon's HTTP API, or null if it isn't answering. */
 function daemonGet(apiPath: string): Promise<any> {
   return new Promise((resolve) => {
     const request = http.get({ socketPath: socketPath(), path: apiPath }, (response) => {
@@ -170,15 +205,30 @@ async function restartDaemon(window: BrowserWindow | undefined) {
     }
   }
 
-  for (const window of BrowserWindow.getAllWindows()) linkWindow(window.webContents);
+  for (const [contents, remote] of windowRemotes) if (!remote) linkWindow(contents);
 }
 
 //
 // The window.
 //
 
-function createWindow() {
-  const saved = loadWindowState();
+/** One window per daemon: "local", or a remote's id. */
+const windows = new Map<string, BrowserWindow>();
+const LOCAL = "local";
+
+/** Brings forward the window on that daemon, opening it if there's none. */
+function openWindow(remoteId: string | null = null): BrowserWindow {
+  const window = windows.get(remoteId ?? LOCAL);
+  if (!window) return createWindow(remoteId);
+  if (window.isMinimized()) window.restore();
+  window.show();
+  return window;
+}
+
+function createWindow(remoteId: string | null = null) {
+  const key = remoteId ?? LOCAL;
+  const remote = remoteId ? settings.remotes.find((r) => r.id === remoteId) : null;
+  const saved = loadWindowState(key);
   const window = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -188,6 +238,8 @@ function createWindow() {
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 14, y: 14 },
     backgroundColor: windowBackground(),
+    // For the Window menu and Mission Control; the page has its own titlebar.
+    title: remote ? `Miks — ${remote.name}` : "Miks",
     webPreferences: {
       preload: path.join(import.meta.dirname, "preload.cjs"),
       contextIsolation: true,
@@ -196,10 +248,15 @@ function createWindow() {
   });
 
   const contents = window.webContents;
+  windowRemotes.set(contents, remoteId);
   contents.on("destroyed", () => {
     links.get(contents)?.close();
     links.delete(contents);
+    clearTimeout(retries.get(contents));
+    windowRemotes.delete(contents);
   });
+  // The page would title the window after itself.
+  window.on("page-title-updated", (event) => event.preventDefault());
 
   // Nothing navigates the window away from the UI (a stray file drop would).
   contents.on("will-navigate", (event, url) => {
@@ -217,14 +274,51 @@ function createWindow() {
   else window.loadFile(path.join(root, "packages/ui/dist/index.html"));
 
   if (saved?.maximized) window.maximize();
-  rememberWindowState(window);
+  rememberWindowState(window, key);
 
-  mainWindow = window;
+  windows.set(key, window);
+  // Not for this Mac's, which opens first, before the list is read.
+  if (remoteId) rememberOpenRemotes();
   window.on("closed", () => {
-    if (mainWindow === window) mainWindow = null;
+    if (windows.get(key) === window) windows.delete(key);
+    // Closed by hand, it stays closed; open when Miks quit, it comes back.
+    if (!quitting) rememberOpenRemotes();
+    if (remoteId && !windows.has(key)) stopTunnel(remoteId);
   });
   return window;
 }
+
+//
+// Remote windows open when Miks last quit open again with it.
+//
+
+const openRemotesPath = () => path.join(app.getPath("userData"), "remote-windows.json");
+
+function rememberOpenRemotes() {
+  const ids = [...windows.keys()].filter((key) => key !== LOCAL);
+  fs.writeFileSync(openRemotesPath(), JSON.stringify(ids));
+}
+
+function reopenRemotes() {
+  try {
+    const ids: string[] = JSON.parse(fs.readFileSync(openRemotesPath(), "utf8"));
+    for (const id of ids) if (settings.remotes.some((remote) => remote.id === id)) openWindow(id);
+  } catch {}
+}
+
+/** What a window's page shows of the machine it's on: null for this Mac. */
+const targetFor = (contents: WebContents) => {
+  const remote = remoteFor(contents);
+  return remote ? { name: remote.name, color: remote.color, host: remote.host } : null;
+};
+
+ipcMain.on("miks:getTarget", (event) => {
+  event.returnValue = targetFor(event.sender);
+});
+
+ipcMain.on("miks:openRemote", (_event, id: string) => {
+  if (settings.remotes.some((remote) => remote.id === id)) openWindow(id);
+});
 
 //
 // Where the window was, in the UI's profile folder, so it reopens there.
@@ -232,11 +326,13 @@ function createWindow() {
 
 type WindowState = { bounds: Electron.Rectangle; maximized: boolean };
 
-const windowStatePath = () => path.join(app.getPath("userData"), "window.json");
+// Each daemon's window has its own: window.json for this Mac's.
+const windowStatePath = (key: string) =>
+  path.join(app.getPath("userData"), key === LOCAL ? "window.json" : `window-${key}.json`);
 
-function loadWindowState(): WindowState | null {
+function loadWindowState(key: string): WindowState | null {
   try {
-    const state: WindowState = JSON.parse(fs.readFileSync(windowStatePath(), "utf8"));
+    const state: WindowState = JSON.parse(fs.readFileSync(windowStatePath(key), "utf8"));
     // Somewhere you can still see: not on a display that's since gone away.
     const { bounds } = state;
     const visible = screen.getAllDisplays().some(({ workArea: area }) =>
@@ -251,14 +347,14 @@ function loadWindowState(): WindowState | null {
   }
 }
 
-function rememberWindowState(window: BrowserWindow) {
+function rememberWindowState(window: BrowserWindow, key: string) {
   let timer: NodeJS.Timeout | null = null;
 
   const save = () => {
     if (window.isDestroyed() || window.isFullScreen()) return;
     // The size it returns to when un-maximized, not the maximized size.
     const state: WindowState = { bounds: window.getNormalBounds(), maximized: window.isMaximized() };
-    fs.writeFileSync(windowStatePath(), JSON.stringify(state));
+    fs.writeFileSync(windowStatePath(key), JSON.stringify(state));
   };
   const saveSoon = () => {
     if (timer) clearTimeout(timer);
@@ -275,8 +371,6 @@ function rememberWindowState(window: BrowserWindow) {
   });
 }
 
-let mainWindow: BrowserWindow | null = null;
-
 /**
  * What the window shows before the page paints: the UI's own background for
  * the current appearance, so a launch doesn't flash the wrong one.
@@ -289,11 +383,12 @@ nativeTheme.on("updated", () => {
   for (const window of BrowserWindow.getAllWindows()) window.setBackgroundColor(windowBackground());
 });
 
-// A notification was clicked: bring Miks forward.
-ipcMain.on("miks:focus", () => {
-  if (!mainWindow) return createWindow();
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
+// A notification was clicked: bring its window forward.
+ipcMain.on("miks:focus", (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (!window) return;
+  if (window.isMinimized()) window.restore();
+  window.show();
   app.focus({ steal: true });
 });
 
@@ -317,12 +412,32 @@ ipcMain.on("miks:getSettings", (event) => {
 });
 
 ipcMain.on("miks:setSettings", (_event, changes: Partial<Settings>) => {
+  const previous = settings.remotes;
   settings = { ...settings, ...changes };
   fs.mkdirSync(path.dirname(settingsPath), { recursive: true, mode: 0o700 });
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
   for (const window of BrowserWindow.getAllWindows()) window.webContents.send("miks:settings", settings);
   if ("claudeHooks" in changes) updateClaudeHooks();
+  if ("remotes" in changes) remotesChanged(previous);
 });
+
+/**
+ * A remote was added, edited or removed: the menu lists them, and windows on
+ * one that changed reconnect (through a new tunnel, if its host did).
+ */
+function remotesChanged(previous: Remote[]) {
+  buildMenu();
+  for (const [contents, id] of windowRemotes) {
+    if (!id) continue;
+    const before = previous.find((remote) => remote.id === id);
+    const now = settings.remotes.find((remote) => remote.id === id);
+    if (!contents.isDestroyed()) contents.send("miks:target", targetFor(contents));
+    if (now && before?.host === now.host) continue;
+    stopTunnel(id);
+    if (now) linkWindow(contents);
+    else BrowserWindow.fromWebContents(contents)?.close();
+  }
+}
 
 function updateClaudeHooks() {
   // A scratch Miks (MIKS_HOME) mustn't rewire the real Claude Code's hooks.
@@ -368,7 +483,8 @@ function openFolder(file: string) {
 
 async function openPendingFolders() {
   if (pendingFolders.length === 0) return;
-  const window = mainWindow ?? (app.isReady() ? createWindow() : null);
+  // Folders are this Mac's, so always its window.
+  const window = app.isReady() ? openWindow() : null;
   // Once connected; linkWindow calls back.
   const link = window && links.get(window.webContents);
   if (!window || !link) return;
@@ -415,6 +531,7 @@ function buildMenu() {
         command("settings", "CmdOrCtrl+,", "Settings…"),
         { type: "separator" },
         {
+          // This Mac's: another Mac's daemon is its own business.
           label: "Restart daemon…",
           click: (_item, window) => restartDaemon(window as BrowserWindow | undefined),
         },
@@ -436,6 +553,20 @@ function buildMenu() {
         { type: "separator" },
         command("closeTab", "CmdOrCtrl+W", "Close tab"),
         command("closeWorkspace", "CmdOrCtrl+Shift+W", "Close workspace"),
+        { type: "separator" },
+        {
+          label: "Open window on",
+          submenu: [
+            { label: "This Mac", click: () => openWindow() },
+            ...(settings.remotes.length ? [{ type: "separator" as const }] : []),
+            ...settings.remotes.map((remote) => ({ label: remote.name, click: () => openWindow(remote.id) })),
+            { type: "separator" },
+            {
+              label: "Add a Mac…",
+              click: (_item, window) => (window as BrowserWindow | undefined ?? openWindow()).webContents.send("miks:command", "settingsRemotes"),
+            },
+          ],
+        },
       ],
     },
     {
@@ -501,6 +632,7 @@ app.whenReady().then(() => {
   if (!app.isPackaged) app.dock?.setIcon(iconPath);
   buildMenu();
   createWindow();
+  reopenRemotes();
   updateClaudeHooks();
   startUpdates(confirmQuitForUpdate);
 
@@ -508,6 +640,8 @@ app.whenReady().then(() => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
+
+app.on("will-quit", () => stopAllTunnels());
 
 // Closing the last window quits, like a terminal app.
 app.on("window-all-closed", () => app.quit());
@@ -523,6 +657,8 @@ app.on("window-all-closed", () => app.quit());
 
 let quitChecked = false;
 let relaunching = false;
+/** Windows closing now are closing because Miks is quitting. */
+let quitting = false;
 
 process.on("SIGUSR2", () => {
   relaunching = true;
@@ -530,10 +666,14 @@ process.on("SIGUSR2", () => {
 });
 
 app.on("before-quit", (event) => {
+  quitting = true;
   if (quitChecked || relaunching || settings.keepDaemonRunning) return;
   event.preventDefault();
   stopDaemonForQuit().then((quit) => {
-    if (!quit) return;
+    if (!quit) {
+      quitting = false;
+      return;
+    }
     quitChecked = true;
     app.quit();
   });
@@ -548,9 +688,11 @@ async function confirmQuitForUpdate(): Promise<boolean> {
 
 /** Stops the daemon, unless that means stopping programs you'd rather keep. */
 async function stopDaemonForQuit(): Promise<boolean> {
+  // Only ever this Mac's daemon, and only its windows count.
+  const localLinks = [...links].filter(([contents]) => !windowRemotes.get(contents));
   const ping = await daemonGet("/api/ping");
   if (!ping?.pid) return true;
-  if ((ping.clients ?? 0) > links.size) return true;
+  if ((ping.clients ?? 0) > localLinks.length) return true;
 
   const running = await runningPrograms();
   if (running.length > 0) {
@@ -573,8 +715,10 @@ async function stopDaemonForQuit(): Promise<boolean> {
   }
 
   // Let go of it first, so no window reconnects (and restarts it) as it goes.
-  for (const socket of links.values()) socket.close();
-  links.clear();
+  for (const [contents, socket] of localLinks) {
+    socket.close();
+    links.delete(contents);
+  }
   process.kill(ping.pid, "SIGTERM");
   return true;
 }
