@@ -438,7 +438,22 @@ function buildMenu() {
         command("closeWorkspace", "CmdOrCtrl+Shift+W", "Close workspace"),
       ],
     },
-    { role: "editMenu" },
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "selectAll" },
+        { type: "separator" },
+        // For pasting a command and what it printed into an agent elsewhere.
+        command("selectLastCommand", "CmdOrCtrl+Shift+A", "Select last command"),
+        command("clearToStart", "CmdOrCtrl+K", "Clear to start"),
+      ],
+    },
     {
       label: "View",
       submenu: [

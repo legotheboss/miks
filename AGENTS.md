@@ -114,6 +114,14 @@ resizes); keep it passing.
   Claude Code crawled next to Ghostty. `ui/wheel.ts` sends one per line's
   height scrolled instead. The serializer restores mouse tracking but not
   its SGR encoding (1006), so `Pane.ts` appends that to snapshots.
+- zsh panes get `ZDOTDIR=packages/daemon/shell/zsh`, whose startup files
+  source yours (at the top level; inside a function, your `typeset`s would
+  turn local) and then put `ZDOTDIR` back, adding OSC 133 prompt and command
+  marks. The UI keeps them as xterm.js markers (`ui/commandMarks.ts`) for
+  Select last command (⌘⇧A). Snapshots carry no marks, so after one the
+  cursor's line counts as a prompt. Clear to start (⌘K) clears the UI's
+  terminal and, by a `clear` message, the daemon's, or the next attach would
+  bring it back.
 - Only attached clients answer terminal queries (the headless emulator's
   replies are dropped, as in VS Code), so each query gets one answer.
 - Panes strip `CMUX_*`, `GHOSTTY_*`, `TERM_PROGRAM*`, `CLAUDE*`,

@@ -9,6 +9,7 @@ import { DragEvent, HTMLAttributes, useEffect, useRef } from "react";
 import { styled } from "styled-components";
 import { daemon } from "./daemon";
 import { getSettings, useSettings } from "./settings";
+import { trackCommands } from "./commandMarks";
 import { handleWheel } from "./wheel";
 
 /**
@@ -25,7 +26,7 @@ export function TerminalView({
   active: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const viewRef = useRef<{ terminal: Terminal; fit: FitAddon } | null>(null);
+  const viewRef = useRef<View | null>(null);
   const activeRef = useRef(active);
   activeRef.current = active;
   const dark = useMatchMedia("(prefers-color-scheme: dark)");
@@ -42,7 +43,8 @@ export function TerminalView({
       theme: dark ? darkTheme : lightTheme,
     });
     const fit = new FitAddon();
-    viewRef.current = { terminal, fit };
+    const commands = trackCommands(terminal);
+    viewRef.current = { tabId, terminal, fit, commands };
 
     terminal.loadAddon(fit);
     terminal.loadAddon(new Unicode11Addon());
@@ -61,7 +63,9 @@ export function TerminalView({
           terminal.resize(event.cols, event.rows);
         }
       }
-      terminal.write(event.data);
+      // Once it's parsed, where the cursor is: the snapshot carries no marks.
+      if (event.type === "snapshot") terminal.write(event.data, () => commands.attached());
+      else terminal.write(event.data);
     });
 
     // Only the tab on screen decides its pane's size, and only once its
@@ -134,10 +138,10 @@ export function TerminalView({
 
     prepareActive(view.terminal, view.fit);
     view.terminal.focus();
-    activeTerminal = view.terminal;
+    activeView = view;
 
     return () => {
-      if (activeTerminal === view.terminal) activeTerminal = null;
+      if (activeView === view) activeView = null;
       webglAddons.get(view.terminal)?.dispose();
       webglAddons.delete(view.terminal);
     };
@@ -171,11 +175,31 @@ function shellEscape(path: string): string {
   return path.replace(/[\s!"#$&'()*;<>?[\\\]^`{|}~]/g, "\\$&");
 }
 
-let activeTerminal: Terminal | null = null;
+type View = { tabId: string; terminal: Terminal; fit: FitAddon; commands: ReturnType<typeof trackCommands> };
+
+let activeView: View | null = null;
 
 /** Gives the keyboard back to the terminal on screen (after a dialog, say). */
 export function focusActiveTerminal() {
-  activeTerminal?.focus();
+  activeView?.terminal.focus();
+}
+
+/** Edit → Select last command (⌘⇧A): its prompt through its output. */
+export function selectLastCommand() {
+  activeView?.commands.selectLast();
+}
+
+/**
+ * Edit → Clear to start (⌘K), as in Terminal.app: the screen and scrollback,
+ * all but the line you're typing on. Not in full-screen programs, which own
+ * their screen.
+ */
+export function clearActiveTerminal() {
+  const view = activeView;
+  if (!view || view.terminal.buffer.active.type !== "normal") return;
+  view.terminal.clear();
+  view.commands.cleared();
+  daemon.send({ type: "clear", tabId: view.tabId });
 }
 
 /**

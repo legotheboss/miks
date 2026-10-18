@@ -175,6 +175,8 @@ export async function serve({
         }
         case "input":
           return workspaces.getPane(message.tabId)?.write(message.data);
+        case "clear":
+          return workspaces.getPane(message.tabId)?.clear();
         case "resize":
           return workspaces.getPane(message.tabId)?.resize(message.cols, message.rows);
       }

@@ -13,7 +13,7 @@ import { Sidebar } from "./Sidebar";
 import { workspaceTitle } from "./status";
 import { StyledTabBar, TabBar } from "./TabBar";
 import { SettingsDialog } from "./SettingsDialog";
-import { TERMINAL_BACKGROUND, TerminalView } from "./TerminalView";
+import { clearActiveTerminal, selectLastCommand, TERMINAL_BACKGROUND, TerminalView } from "./TerminalView";
 
 export function App() {
   const { state, connected, error } = useDaemon();
@@ -178,6 +178,10 @@ function runCommand(command: string) {
       return setFontSize(getSettings().fontSize - 1);
     case "fontReset":
       return setFontSize(DEFAULT_SETTINGS.fontSize);
+    case "selectLastCommand":
+      return selectLastCommand();
+    case "clearToStart":
+      return clearActiveTerminal();
   }
 
   const state = daemon.getSnapshot().state;

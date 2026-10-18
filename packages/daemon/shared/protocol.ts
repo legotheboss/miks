@@ -77,6 +77,8 @@ export type ClientMessage =
    */
   | { type: "attach"; tabId: string; cols?: number; rows?: number }
   | { type: "detach"; tabId: string }
+  /** The UI cleared its terminal (⌘K); the daemon's copy follows. */
+  | { type: "clear"; tabId: string }
   | { type: "input"; tabId: string; data: string }
   | { type: "resize"; tabId: string; cols: number; rows: number };
 

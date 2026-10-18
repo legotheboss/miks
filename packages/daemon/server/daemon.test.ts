@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import { connectDaemon } from "../shared/connect.ts";
 import type { ClientMessage, DaemonMessage, DaemonState } from "../shared/protocol.ts";
 import { type Daemon, serve } from "./daemon.ts";
+import { Pane } from "./Pane.ts";
 
 const { Terminal } = headless;
 
@@ -371,6 +372,29 @@ test("a new tab starts where the current one is", async () => {
 
   const newTabId = (await daemon.workspaces.newTab(workspaceId))!;
   expect(await daemon.workspaces.getPane(newTabId)!.cwd()).toBe(fs.realpathSync(subdir));
+});
+
+test("zsh reads your startup files, gives ZDOTDIR back, and marks each command", async () => {
+  for (const file of [".zshenv", ".zprofile", ".zshrc", ".zlogin"]) {
+    fs.writeFileSync(path.join(home, file), `MIKS_TEST_READ="$MIKS_TEST_READ ${file}"\n`);
+  }
+  fs.appendFileSync(path.join(home, ".zshrc"), "PS1='%% '\n");
+
+  const pane = new Pane({ id: "zsh", cwd: home, env: { HOME: home }, command: ["/bin/zsh", "-l"] });
+  let output = "";
+  pane.attach({ snapshot: () => {}, output: (data) => (output += data) });
+  try {
+    await waitFor(() => output.includes("\x1b]133;A\x07"));
+    pane.write("echo read:$MIKS_TEST_READ zdotdir:${ZDOTDIR-unset}\n");
+    await waitFor(() => /\x1b\]133;D;0\x07/.test(output));
+
+    expect(output).toContain("read: .zshenv .zprofile .zshrc .zlogin zdotdir:unset");
+    // The prompt, the command's output, its end, the next prompt.
+    expect(output.indexOf("\x1b]133;C\x07")).toBeLessThan(output.indexOf("read: .zshenv"));
+    expect(output.lastIndexOf("\x1b]133;A\x07")).toBeGreaterThan(output.indexOf("\x1b]133;D;0\x07"));
+  } finally {
+    pane.kill();
+  }
 });
 
 test("programs that set mode 2031 hear when the appearance changes", async () => {

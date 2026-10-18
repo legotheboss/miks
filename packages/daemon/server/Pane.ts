@@ -9,6 +9,9 @@ const { Terminal } = headless;
 
 const SCROLLBACK = 10_000;
 
+/** Startup files that mark prompts and commands in zsh (see .zshenv there). */
+const ZSH_INTEGRATION = path.resolve(import.meta.dirname, "../shell/zsh");
+
 /** Someone watching a pane: in practice, one UI connection. */
 export type PaneViewer = {
   /** The screen as VT sequences, at the pane's size. */
@@ -158,7 +161,7 @@ export class Pane extends EventEmitter<{
       cols,
       rows,
       cwd,
-      env: { ...paneEnv(), ...env },
+      env: { ...paneEnv(), ...shellIntegrationEnv(file), ...env },
     });
 
     this.pty.onData((data) => {
@@ -216,6 +219,14 @@ export class Pane extends EventEmitter<{
     this.pty.resize(cols, rows);
   }
 
+  /**
+   * Clears the screen and scrollback but the cursor's line, as the UI's
+   * terminal just did (⌘K), so reattaching doesn't bring it all back.
+   */
+  clear() {
+    this.terminal.clear();
+  }
+
   kill() {
     this.pty.kill("SIGHUP");
   }
@@ -270,6 +281,13 @@ export class Pane extends EventEmitter<{
       });
     });
   }
+}
+
+/** zsh reads Miks's startup files, which read yours. Other shells go without. */
+function shellIntegrationEnv(file: string): Record<string, string> {
+  if (path.basename(file) !== "zsh") return {};
+  // Without a ZDOTDIR of yours, they read from the pane's $HOME.
+  return { ZDOTDIR: ZSH_INTEGRATION, ...(process.env.ZDOTDIR ? { MIKS_USER_ZDOTDIR: process.env.ZDOTDIR } : {}) };
 }
 
 function paneEnv(): Record<string, string> {
