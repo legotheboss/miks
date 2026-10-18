@@ -126,4 +126,7 @@ USER.md
 
 .env.release.local
 
+## Neo mirro script
+mirror-to-neo.sh
+
 # @chatwing:projectIgnores:end
