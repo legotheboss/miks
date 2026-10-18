@@ -14,8 +14,9 @@ I enjoyed [cmux](https://github.com/manaflow-ai/cmux) until I realized it bundle
 - Terminals live in a background daemon, so reloading the UI never touches
   a session. Quitting ends them like any terminal app (asking first if
   anything's running), or turn on "Keep terminals running"
-- Comes back where you left it: layout, each tab's folder, and its Claude
-  session, resumed
+- Comes back where you left it: layout, each tab's folder and history, and
+  its Claude session, resumed. `miks keep <command>` brings back your own
+  long-running commands the same way
 - Follows light and dark mode, and tells Claude Code when it changes
 - Drop files in to type their paths. Drop a folder on the Dock icon, or
   `open -a Miks <folder>`, for a workspace there (so it works as GitHub

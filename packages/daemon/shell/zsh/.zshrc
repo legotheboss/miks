@@ -33,6 +33,23 @@ if [[ -n $MIKS_HISTORY ]]; then
   }
 fi
 
+# `miks keep <command>`: runs it, and if Miks restores this tab while it's
+# still running (a daemon restart, quitting and reopening), runs it again
+# there. It stops being kept once it ends, however it ends.
+miks() {
+  if [[ $1 != keep || $# -lt 2 ]]; then
+    builtin print -u2 "Usage: miks keep <command> [arguments...]"
+    return 2
+  fi
+  shift
+  if [[ -n $MIKS_PANE_ID && -S $MIKS_SOCKET ]]; then
+    # Quoted for the shell that runs it again.
+    builtin print -rn -- "${(j: :)${(q-)@}}" |
+      curl -sf -m 2 --unix-socket "$MIKS_SOCKET" --data-binary @- "http://miks/api/keep?pane=$MIKS_PANE_ID" >/dev/null
+  fi
+  "$@"
+}
+
 # Marks around each command (OSC 133, as Ghostty, iTerm and VS Code read
 # them): A where a prompt starts, C where a command's output starts, D where
 # it ends. "Select last command" (⌘⇧A) goes by them.

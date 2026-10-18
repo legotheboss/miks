@@ -37,6 +37,8 @@ export type Tab = {
   agent: AgentState | null;
   /** The program in front of the tab's shell, which closing it would stop; missing before protocol 2. */
   running?: string | null;
+  /** Whether a restore brings back what's running (`miks keep`, or a Claude session). Since protocol 3. */
+  kept?: boolean;
 };
 
 export type Workspace = {

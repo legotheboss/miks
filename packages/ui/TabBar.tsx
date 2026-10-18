@@ -1,6 +1,6 @@
 import { colors } from "crosswing/colors";
 import { fonts } from "crosswing/fonts";
-import { Plus, X } from "lucide-react";
+import { Plus, RotateCw, X } from "lucide-react";
 import type { Tab, Workspace } from "miks/shared/protocol";
 import { Fragment, HTMLAttributes } from "react";
 import { styled } from "styled-components";
@@ -100,6 +100,11 @@ function TabView({ tab, workspaceId, active }: { tab: Tab; workspaceId: string; 
       <div className="box">
         {tab.agent && <StatusDot status={tab.agent.status} />}
         <div className="title">{tabTitle(tab)}</div>
+        {tab.kept && (
+          <span className="kept" title="Runs again when Miks restores this tab">
+            <RotateCw />
+          </span>
+        )}
         <button
           className="close"
           title="Close tab (⌘W)"
@@ -145,6 +150,17 @@ const StyledTab = styled.div`
 
     &:hover {
       background: ${colors.buttonBackgroundGlow()};
+    }
+
+    > .kept {
+      display: flex;
+      flex-shrink: 0;
+      color: ${colors.textSecondary()};
+
+      > svg {
+        width: 11px;
+        height: 11px;
+      }
     }
 
     > .title {

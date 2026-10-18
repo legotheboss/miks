@@ -8,6 +8,9 @@ import { type AgentState, type DaemonState, PROTOCOL_VERSION, type Tab } from ".
 import { Pane } from "./Pane.ts";
 
 /** What survives a daemon restart, in `state.json`. */
+/** How long a finished turn waits for its session to end before it's `done`. */
+const DONE_DELAY = 1000;
+
 export type SavedState = {
   version: 1;
   activeWorkspace: number;
@@ -15,7 +18,7 @@ export type SavedState = {
     title: string | null;
     cwd: string;
     activeTab: number;
-    tabs: { cwd: string; claudeSessionId?: string; historyId?: string }[];
+    tabs: { cwd: string; claudeSessionId?: string; historyId?: string; keep?: string }[];
   }[];
 };
 
@@ -39,6 +42,14 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
   private readonly agents = new Map<string, AgentState>();
   /** The Claude Code session in each tab, from its hooks, for resuming it. */
   private readonly claudeSessions = new Map<string, { id: string; transcriptPath?: string }>();
+  /**
+   * Commands run with `miks keep`, to run again if the tab is restored while
+   * they still are. One stops being kept once its shell is back in front,
+   * after having been seen running (it starts a moment after it registers).
+   */
+  private readonly keeps = new Map<string, { command: string; seenRunning: boolean }>();
+  /** A finished turn waits a moment before it's `done` (see applyHook). */
+  private readonly pendingDone = new Map<string, NodeJS.Timeout>();
   /** Each tab's own shell history file's name, kept across restores. */
   private readonly historyIds = new Map<string, string>();
   /** Each tab's shell's directory, as of the last `pollCwds`. */
@@ -142,8 +153,9 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     {
       cwd,
       resumeClaudeSession,
+      keep,
       historyId = randomUUID(),
-    }: { cwd?: string; resumeClaudeSession?: string; historyId?: string } = {},
+    }: { cwd?: string; resumeClaudeSession?: string; keep?: string; historyId?: string } = {},
   ): string | undefined {
     const workspace = this.findWorkspace(workspaceId);
     if (!workspace) return;
@@ -152,12 +164,18 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     const pane = new Pane({
       id,
       cwd: cwd ?? workspace.cwd,
-      command: resumeClaudeSession ? this.resumeCommand(resumeClaudeSession) : this.command,
+      // A kept command first: a Claude session in such a tab is one it ran.
+      command: keep
+        ? this.thenShell(keep)
+        : resumeClaudeSession
+          ? this.thenShell(`${this.claudeCommand} --resume ${resumeClaudeSession}`)
+          : this.command,
       dark: this.dark,
       env: { MIKS_PANE_ID: id, MIKS_SOCKET: this.socketPath, MIKS_HISTORY: this.historyFile(historyId) },
     });
     this.panes.set(id, pane);
     this.historyIds.set(id, historyId);
+    if (keep) this.keeps.set(id, { command: keep, seenRunning: false });
     workspace.tabIds.push(id);
     workspace.activeTabId = id;
 
@@ -202,7 +220,23 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
   pollForeground() {
     let changed = false;
     for (const pane of this.panes.values()) changed = pane.pollForeground() || changed;
+
+    for (const [tabId, kept] of this.keeps) {
+      if (this.panes.get(tabId)?.running()) kept.seenRunning = true;
+      else if (kept.seenRunning) {
+        this.keeps.delete(tabId);
+        changed = true;
+      }
+    }
+
     if (changed) this.emit("change");
+  }
+
+  /** `miks keep <command>` in a tab: run it again if the tab is restored. */
+  keep(tabId: string, command: string) {
+    if (!this.panes.has(tabId) || !command.trim()) return;
+    this.keeps.set(tabId, { command, seenRunning: false });
+    this.emit("change");
   }
 
   /**
@@ -261,6 +295,10 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     const set = (status: AgentState["status"], message?: string) =>
       this.agents.set(tabId, { kind: "claude", status, message, since: Date.now() });
 
+    // Whatever comes next supersedes a turn waiting to be `done`.
+    clearTimeout(this.pendingDone.get(tabId));
+    this.pendingDone.delete(tabId);
+
     switch (event) {
       case "SessionStart":
         set("idle");
@@ -282,9 +320,20 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
         }
         set("waiting", payload?.message);
         break;
-      case "Stop":
-        set("done");
-        break;
+      case "Stop": {
+        // A one-shot `claude -p` (a script's, say) ends its session right
+        // after its turn, 25ms later in practice; nothing for you to see, so
+        // no `done` (and no notification). An interactive session stays.
+        const timer = setTimeout(() => {
+          this.pendingDone.delete(tabId);
+          if (!this.agents.has(tabId)) return;
+          set("done");
+          this.emit("change");
+        }, DONE_DELAY);
+        timer.unref();
+        this.pendingDone.set(tabId, timer);
+        return;
+      }
       case "SessionEnd":
         this.agents.delete(tabId);
         this.claudeSessions.delete(tabId);
@@ -326,6 +375,7 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
             cwd: (await this.panes.get(tabId)?.cwd()) ?? workspace.cwd,
             claudeSessionId: this.resumableSession(tabId),
             historyId: this.historyIds.get(tabId),
+            keep: this.keeps.get(tabId)?.command,
           })),
         ),
       })),
@@ -357,7 +407,12 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
       this.workspaces.push(workspace);
 
       for (const tab of savedWorkspace.tabs) {
-        this.createTab(workspace.id, { cwd: tab.cwd, resumeClaudeSession: tab.claudeSessionId, historyId: tab.historyId });
+        this.createTab(workspace.id, {
+          cwd: tab.cwd,
+          resumeClaudeSession: tab.claudeSessionId,
+          keep: tab.keep,
+          historyId: tab.historyId,
+        });
       }
       workspace.activeTabId = workspace.tabIds[savedWorkspace.activeTab] ?? workspace.tabIds[0] ?? null;
     }
@@ -405,14 +460,15 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
    * exits. Interactive as well as login, so the shell reads .zshrc, which is
    * often where `claude` gets onto the PATH.
    */
-  private resumeCommand(sessionId: string): string[] {
+  private thenShell(command: string): string[] {
     const shell = this.command?.[0] ?? (process.env.SHELL || "/bin/zsh");
-    return [shell, "-ilc", `${this.claudeCommand} --resume ${sessionId}; exec ${shell} -l`];
+    return [shell, "-ilc", `${command}; exec ${shell} -l`];
   }
 
   /** Ends every pane. For tests; the real daemon just exits. */
   killAll() {
     this.stopping = true;
+    for (const timer of this.pendingDone.values()) clearTimeout(timer);
     for (const pane of this.panes.values()) pane.kill();
   }
 
@@ -423,6 +479,7 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
       cwd: this.cwds.get(id) ?? null,
       agent: this.agents.get(id) ?? null,
       running: this.panes.get(id)?.running() ?? null,
+      kept: this.keeps.has(id) || !!this.resumableSession(id),
     };
   }
 
@@ -431,6 +488,9 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     const historyId = this.historyIds.get(tabId);
     if (historyId && !this.stopping) fs.rmSync(this.historyFile(historyId), { force: true });
     this.historyIds.delete(tabId);
+    this.keeps.delete(tabId);
+    clearTimeout(this.pendingDone.get(tabId));
+    this.pendingDone.delete(tabId);
     this.panes.delete(tabId);
     this.agents.delete(tabId);
     this.claudeSessions.delete(tabId);

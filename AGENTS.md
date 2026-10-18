@@ -146,6 +146,15 @@ resizes); keep it passing.
   Miks's `.zshrc` appends each command to in preexec (zsh's history format)
   and `fc -R`s last on start, so ↑ in a restored tab is its own last
   command. Deleted when the tab closes; restore deletes orphans.
+- `miks keep <command>` (a function in Miks's `.zshrc`) posts the command,
+  shell-quoted, to `/api/keep`, then runs it. The daemon saves it with the
+  tab (`keep` in `state.json`) and a restore runs it again (before any
+  Claude session: one in that tab is the command's), until it's been seen
+  in front and the shell is back. `Tab.kept` (↻ in the tab bar) covers that
+  and resumable Claude sessions.
+- `claude -p` fires every hook, with SessionEnd 25ms after Stop (captured
+  live), so Stop waits `DONE_DELAY` before `done`: one-shot runs (scripts)
+  show working, then nothing, and never notify.
 - Copying reaches the Mac you're at: Miks's zsh puts `shell/bin` first on
   PATH (in `.zshrc`, after yours, since macOS's `path_helper` reorders PATH
   in `/etc/zprofile`), whose `pbcopy` runs Apple's and also sends OSC 52, and

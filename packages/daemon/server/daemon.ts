@@ -94,6 +94,14 @@ export async function serve({
       return json(res, 200, workspaces.getState());
     }
 
+    if (req.method === "POST" && url.pathname === "/api/keep") {
+      const pane = url.searchParams.get("pane");
+      return readText(req).then((command) => {
+        if (pane) workspaces.keep(pane, command);
+        json(res, 200, { ok: true });
+      });
+    }
+
     if (req.method === "POST" && url.pathname === "/api/hook") {
       const pane = url.searchParams.get("pane");
       return readJson(req).then((payload) => {
@@ -324,6 +332,12 @@ async function removeStaleSocket(socketPath: string) {
 function json(res: http.ServerResponse, status: number, body: any) {
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(body));
+}
+
+async function readText(req: http.IncomingMessage): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(chunk);
+  return Buffer.concat(chunks).toString();
 }
 
 async function readJson(req: http.IncomingMessage): Promise<any> {

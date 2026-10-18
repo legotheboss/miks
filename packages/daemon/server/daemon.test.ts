@@ -178,7 +178,8 @@ test("hooks drive the agent status", async () => {
   expect(status()).toBe("working");
 
   await postHook(tabId, { hook_event_name: "Stop" });
-  expect(status()).toBe("done");
+  // Once it's clear the session goes on (a one-shot one ends right away).
+  await waitFor(() => status() === "done");
 
   // The idle reminder after a finished turn doesn't turn `done` into `waiting`.
   await postHook(tabId, { hook_event_name: "Notification", notification_type: "idle_prompt" });
@@ -189,6 +190,27 @@ test("hooks drive the agent status", async () => {
 
   await postHook(tabId, { hook_event_name: "SessionEnd" });
   expect(status()).toBeUndefined();
+});
+
+test("a one-shot claude -p shows working, then nothing: never done, never a notification", async () => {
+  daemon.workspaces.createWorkspace({ cwd: home });
+  const tabId = activeTab(daemon.workspaces.getState());
+  const statuses: (string | undefined)[] = [];
+  daemon.workspaces.on("change", () => statuses.push(daemon.workspaces.getState().workspaces[0]?.tabs[0]?.agent?.status));
+
+  // What claude -p sends, in order (captured from a real run).
+  const session = { session_id: "c758b276-c321-4b47-a71d-c21d0c14df2b" };
+  await postHook(tabId, { ...session, hook_event_name: "SessionStart", source: "startup" });
+  await postHook(tabId, { ...session, hook_event_name: "UserPromptSubmit" });
+  await postHook(tabId, { ...session, hook_event_name: "Stop" });
+  await postHook(tabId, { ...session, hook_event_name: "SessionEnd", reason: "other" });
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+
+  expect(statuses).toContain("working");
+  expect(statuses).not.toContain("done");
+  expect(daemon.workspaces.getState().workspaces[0].tabs[0].agent).toBeNull();
+  // Nor is it a session to resume.
+  expect(daemon.workspaces.getState().workspaces[0].tabs[0].kept).toBe(false);
 });
 
 test("an interrupted turn ends when Claude's title stops spinning", async () => {
@@ -506,7 +528,8 @@ test("a zsh tab's own commands come back first on ↑ when it's restored", async
 
   // A new shell on the same file (a restored tab): ↑↑ is the multi-line one.
   await run(["\x1b[A", "\x1b[A", "\r"], "multi\r\nline");
-});
+  // Two zsh startups in a row, slow when the whole suite runs at once.
+}, 20_000);
 
 test("after its Mac's Miks quits, the daemon stops when the last window goes", async () => {
   await daemon.close();
@@ -549,6 +572,68 @@ test("Miks coming back cancels the stop, and any window can ask for a restart", 
   expect(await apiPost("/api/restart")).toBe(200);
   await waitFor(() => stops.length === 1);
   expect(stops).toEqual([true]);
+});
+
+test("miks keep: a kept command is saved, runs again on restore, and is let go when it ends", async () => {
+  await daemon.close();
+  const statePath = path.join(home, "state.json");
+  const socketPath = path.join(home, "miks.sock");
+
+  const first = await serve({ socketPath, statePath, command: COMMAND });
+  first.workspaces.createWorkspace({ cwd: home });
+  const tabId = activeTab(first.workspaces.getState());
+  const kept = (workspaces: Daemon["workspaces"]) => workspaces.getState().workspaces[0].tabs[0].kept;
+
+  // What `miks keep` sends, then runs.
+  await apiPostText(`/api/keep?pane=${tabId}`, "echo KEPT-$((1+1)); sleep 30");
+  first.workspaces.getPane(tabId)!.write("sleep 30\n");
+  expect(kept(first.workspaces)).toBe(true);
+  await first.close();
+
+  daemon = await serve({ socketPath, statePath, command: COMMAND });
+  const restored = activeTab(daemon.workspaces.getState());
+  expect(kept(daemon.workspaces)).toBe(true);
+  await waitFor(() => paneText(restored).then((text) => text.includes("KEPT-2")));
+
+  // Seen running, then the shell's back (Ctrl-C here): no longer kept.
+  await waitFor(() => {
+    daemon.workspaces.pollForeground();
+    return daemon.workspaces.getState().workspaces[0].tabs[0].running === "sleep";
+  });
+  daemon.workspaces.getPane(restored)!.write("\x03");
+  await waitFor(() => {
+    daemon.workspaces.pollForeground();
+    return kept(daemon.workspaces) === false;
+  });
+});
+
+test("the miks keep function in zsh registers the command, quoted, then runs it", async () => {
+  fs.writeFileSync(path.join(home, ".zshrc"), "PS1='%% '\n");
+  const http = await import("http");
+  const sock = path.join(home, "capture.sock");
+  const received: string[] = [];
+  const server = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      received.push(`${req.url} ${body}`);
+      res.end("{}");
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(sock, resolve));
+
+  const pane = new Pane({ id: "zsh", cwd: home, env: { HOME: home, MIKS_PANE_ID: "p1", MIKS_SOCKET: sock }, command: ["/bin/zsh", "-l"] });
+  let output = "";
+  pane.attach({ snapshot: () => {}, output: (data) => (output += data) });
+  try {
+    await waitFor(() => output.includes("\x1b]133;A\x07"));
+    pane.write("miks keep echo 'two words' ran-$((1+1))\n");
+    await waitFor(() => output.includes("two words ran-2"));
+    expect(received).toEqual(["/api/keep?pane=p1 echo 'two words' ran-2"]);
+  } finally {
+    pane.kill();
+    server.close();
+  }
 });
 
 test("programs that set mode 2031 hear when the appearance changes", async () => {
@@ -617,6 +702,19 @@ async function paneText(tabId: string, cols = 80, rows = 24): Promise<string> {
   const screen = await client.screen(tabId);
   client.close();
   return screen.text;
+}
+
+/** A POST with a text body; resolves with the status. */
+async function apiPostText(apiPath: string, body: string): Promise<number> {
+  const http = await import("http");
+  return new Promise((resolve, reject) => {
+    const req = http.request({ socketPath: path.join(home, "miks.sock"), path: apiPath, method: "POST" }, (res) => {
+      res.resume();
+      res.on("end", () => resolve(res.statusCode ?? 0));
+    });
+    req.on("error", reject);
+    req.end(body);
+  });
 }
 
 /** A POST with no body; resolves with the status. */
