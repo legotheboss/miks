@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { EventEmitter } from "events";
 import fs from "fs";
 import os from "os";
+import path from "path";
 import { type AgentState, type DaemonState, PROTOCOL_VERSION, type Tab } from "../shared/protocol.ts";
 import { Pane } from "./Pane.ts";
 
@@ -14,7 +15,7 @@ export type SavedState = {
     title: string | null;
     cwd: string;
     activeTab: number;
-    tabs: { cwd: string; claudeSessionId?: string }[];
+    tabs: { cwd: string; claudeSessionId?: string; historyId?: string }[];
   }[];
 };
 
@@ -38,6 +39,8 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
   private readonly agents = new Map<string, AgentState>();
   /** The Claude Code session in each tab, from its hooks, for resuming it. */
   private readonly claudeSessions = new Map<string, { id: string; transcriptPath?: string }>();
+  /** Each tab's own shell history file's name, kept across restores. */
+  private readonly historyIds = new Map<string, string>();
   /** Each tab's shell's directory, as of the last `pollCwds`. */
   private readonly cwds = new Map<string, string>();
   private dark = true;
@@ -136,7 +139,11 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
 
   createTab(
     workspaceId: string,
-    { cwd, resumeClaudeSession }: { cwd?: string; resumeClaudeSession?: string } = {},
+    {
+      cwd,
+      resumeClaudeSession,
+      historyId = randomUUID(),
+    }: { cwd?: string; resumeClaudeSession?: string; historyId?: string } = {},
   ): string | undefined {
     const workspace = this.findWorkspace(workspaceId);
     if (!workspace) return;
@@ -147,9 +154,10 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
       cwd: cwd ?? workspace.cwd,
       command: resumeClaudeSession ? this.resumeCommand(resumeClaudeSession) : this.command,
       dark: this.dark,
-      env: { MIKS_PANE_ID: id, MIKS_SOCKET: this.socketPath },
+      env: { MIKS_PANE_ID: id, MIKS_SOCKET: this.socketPath, MIKS_HISTORY: this.historyFile(historyId) },
     });
     this.panes.set(id, pane);
+    this.historyIds.set(id, historyId);
     workspace.tabIds.push(id);
     workspace.activeTabId = id;
 
@@ -317,6 +325,7 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
           workspace.tabIds.map(async (tabId) => ({
             cwd: (await this.panes.get(tabId)?.cwd()) ?? workspace.cwd,
             claudeSessionId: this.resumableSession(tabId),
+            historyId: this.historyIds.get(tabId),
           })),
         ),
       })),
@@ -348,13 +357,35 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
       this.workspaces.push(workspace);
 
       for (const tab of savedWorkspace.tabs) {
-        this.createTab(workspace.id, { cwd: tab.cwd, resumeClaudeSession: tab.claudeSessionId });
+        this.createTab(workspace.id, { cwd: tab.cwd, resumeClaudeSession: tab.claudeSessionId, historyId: tab.historyId });
       }
       workspace.activeTabId = workspace.tabIds[savedWorkspace.activeTab] ?? workspace.tabIds[0] ?? null;
     }
 
     this.activeWorkspaceId = this.workspaces[saved.activeWorkspace]?.id ?? this.workspaces[0]?.id ?? null;
     this.emit("change");
+
+    // Histories of tabs that didn't come back (a crash lost their state).
+    const kept = new Set([...this.historyIds.values()].map((id) => `${id}.zsh`));
+    try {
+      for (const file of fs.readdirSync(this.historyDir())) {
+        if (!kept.has(file)) fs.rmSync(path.join(this.historyDir(), file), { force: true });
+      }
+    } catch {}
+  }
+
+  /**
+   * Where a tab's own shell history goes (Miks's zsh startup files keep it):
+   * the commands it ran, read back when the tab is restored, so ↑ picks up
+   * where you were in that tab.
+   */
+  private historyDir(): string {
+    return path.join(path.dirname(this.socketPath), "history");
+  }
+
+  private historyFile(historyId: string): string {
+    fs.mkdirSync(this.historyDir(), { recursive: true, mode: 0o700 });
+    return path.join(this.historyDir(), `${historyId}.zsh`);
   }
 
   /**
@@ -396,6 +427,10 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
   }
 
   private removeTab(tabId: string) {
+    // Closed for good, not just stopping with the daemon: its history goes.
+    const historyId = this.historyIds.get(tabId);
+    if (historyId && !this.stopping) fs.rmSync(this.historyFile(historyId), { force: true });
+    this.historyIds.delete(tabId);
     this.panes.delete(tabId);
     this.agents.delete(tabId);
     this.claudeSessions.delete(tabId);

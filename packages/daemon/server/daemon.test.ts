@@ -263,6 +263,13 @@ test("a restarted daemon brings back the layout, each tab's directory, and its C
 
   const [restoredShell, restoredClaude] = workspace.tabs;
   await waitFor(async () => (await daemon.workspaces.getPane(restoredShell.id)!.cwd()) === fs.realpathSync(subdir));
+
+  // Each tab keeps its own shell history file.
+  const savedHistory = JSON.parse(fs.readFileSync(statePath, "utf8")).workspaces[0].tabs[0].historyId;
+  expect(savedHistory).toBeTruthy();
+  const expected = path.join(home, "history", `${savedHistory}.zsh`);
+  daemon.workspaces.getPane(restoredShell.id)!.write(`[ "$MIKS_HISTORY" = '${expected}' ] && echo SAME-$((1+1))\n`);
+  await waitFor(() => paneText(restoredShell.id).then((text) => text.includes("SAME-2")));
   await waitFor(() =>
     paneText(restoredClaude.id).then((text) => text.includes("RESUMING --resume 1234abcd-0000-4000-8000-000000000000")),
   );
@@ -472,6 +479,33 @@ test("pbcopy in a zsh tab also copies through the terminal, for windows on other
   } finally {
     pane.kill();
   }
+});
+
+test("a zsh tab's own commands come back first on ↑ when it's restored", async () => {
+  fs.writeFileSync(path.join(home, ".zshrc"), "PS1='%% '\n");
+  const history = path.join(home, "tab.zsh");
+  const run = async (input: string[], until: string) => {
+    const pane = new Pane({ id: "zsh", cwd: home, env: { HOME: home, MIKS_HISTORY: history }, command: ["/bin/zsh", "-l"] });
+    let output = "";
+    pane.attach({ snapshot: () => {}, output: (data) => (output += data) });
+    try {
+      await waitFor(() => output.includes("\x1b]133;A\x07"));
+      for (const data of input) {
+        pane.write(data);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      await waitFor(() => output.includes(until));
+    } finally {
+      pane.kill();
+    }
+  };
+
+  await run(["echo first-$((1+1))\n", "echo 'multi\nline'\n", "echo done-$((2+2))\n"], "done-4");
+  // Recorded as they ran, the newline inside the second kept as zsh writes it.
+  expect(fs.readFileSync(history, "utf8")).toBe("echo first-$((1+1))\necho 'multi\\\nline'\necho done-$((2+2))\n");
+
+  // A new shell on the same file (a restored tab): ↑↑ is the multi-line one.
+  await run(["\x1b[A", "\x1b[A", "\r"], "multi\r\nline");
 });
 
 test("programs that set mode 2031 hear when the appearance changes", async () => {

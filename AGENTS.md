@@ -134,6 +134,11 @@ resizes); keep it passing.
   cursor's line counts as a prompt. Clear to start (⌘K) clears the UI's
   terminal and, by a `clear` message, the daemon's, or the next attach would
   bring it back.
+- Each tab has its own zsh history, like Terminal.app's: a `historyId` saved
+  in `state.json`, and `MIKS_HISTORY` (`<home>/history/<id>.zsh`), which
+  Miks's `.zshrc` appends each command to in preexec (zsh's history format)
+  and `fc -R`s last on start, so ↑ in a restored tab is its own last
+  command. Deleted when the tab closes; restore deletes orphans.
 - Copying reaches the Mac you're at: Miks's zsh puts `shell/bin` first on
   PATH (in `.zshrc`, after yours, since macOS's `path_helper` reorders PATH
   in `/etc/zprofile`), whose `pbcopy` runs Apple's and also sends OSC 52, and
