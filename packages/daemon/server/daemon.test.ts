@@ -386,6 +386,12 @@ test("a program in front of the shell is reported as running", async () => {
 
   daemon.workspaces.getPane(tabId)!.write("sleep 30\n");
   await waitFor(() => daemon.workspaces.running()[0]?.program === "sleep");
+  expect(daemon.workspaces.running()[0]).toMatchObject({ kept: false, active: false });
+
+  // Kept, it'd come back; mid-turn, it'd still be cut short.
+  daemon.workspaces.keep(tabId, "sleep 30");
+  await postHook(tabId, { hook_event_name: "UserPromptSubmit" });
+  expect(daemon.workspaces.running()[0]).toMatchObject({ kept: true, active: true });
   // And on its tab, for asking before closing it.
   await waitFor(() => {
     daemon.workspaces.pollForeground();

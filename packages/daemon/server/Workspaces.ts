@@ -93,12 +93,26 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     };
   }
 
-  /** Programs running in front of a shell, with where: what quitting would stop. */
-  running(): { program: string; cwd: string | null }[] {
+  /**
+   * Programs running in front of a shell, with where: what quitting would
+   * stop. `kept`: a restore brings it back (`miks keep`, or a Claude session
+   * to resume); `active`: it's mid-task (a Claude turn working or waiting on
+   * you), which even a restore would cut short.
+   */
+  running(): { program: string; cwd: string | null; kept: boolean; active: boolean }[] {
     return this.workspaces.flatMap((workspace) =>
       workspace.tabIds.flatMap((id) => {
         const program = this.panes.get(id)?.running();
-        return program ? [{ program, cwd: this.cwds.get(id) ?? null }] : [];
+        if (!program) return [];
+        const status = this.agents.get(id)?.status;
+        return [
+          {
+            program,
+            cwd: this.cwds.get(id) ?? null,
+            kept: this.keeps.has(id) || !!this.resumableSession(id),
+            active: status === "working" || status === "waiting",
+          },
+        ];
       }),
     );
   }

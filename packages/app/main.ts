@@ -208,21 +208,28 @@ async function restartDaemon(window: BrowserWindow | undefined) {
       return show(window, { message: `Couldn't reach ${remote.name}`, detail: String(error instanceof Error ? error.message : error) });
     }
   }
-  const [ping, state] = await Promise.all([daemonGet("/api/ping", socketFile), daemonGet("/api/state", socketFile)]);
-  const tabs = (state?.workspaces ?? []).reduce((count: number, w: any) => count + w.tabs.length, 0);
+  const ping = await daemonGet("/api/ping", socketFile);
 
-  const options = {
-    type: "warning" as const,
-    message: remote ? `Restart ${remote.name}'s daemon?` : "Restart the daemon?",
-    detail:
-      `This ends every terminal session${remote ? ` on ${remote.name}` : ""}${tabs ? ` (${tabs} open)` : ""}, including any agents running in them.` +
-      (remote ? " Its Claude sessions resume when it's back." : ""),
-    buttons: ["Restart", "Cancel"],
-    defaultId: 1,
-    cancelId: 1,
-  };
-  const { response } = window ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options);
-  if (response !== 0) return;
+  // A restart brings every tab back, in its folder with its history, along
+  // with its kept command or Claude session; it asks only about what won't
+  // come back, or would be cut off mid-task.
+  const lost = await runningPrograms(socketFile, { restart: true });
+  if (lost.length > 0) {
+    const shown = lost.slice(0, 8);
+    const more = lost.length - shown.length;
+    const { response } = await show(window, {
+      type: "warning",
+      message: remote ? `Restart ${remote.name}'s daemon?` : "Restart the daemon?",
+      detail:
+        `Every tab comes back, but restarting stops what's running in these${remote ? ` on ${remote.name}` : ""}:\n\n` +
+        shown.join("\n") +
+        (more ? `\nand ${more} more` : ""),
+      buttons: ["Restart", "Cancel"],
+      defaultId: 1,
+      cancelId: 1,
+    });
+    if (response !== 0) return;
+  }
 
   if (remote) {
     const answer = await daemonGet("/api/restart", socketFile, "POST");
@@ -850,12 +857,21 @@ async function stopDaemonForQuit(): Promise<boolean> {
 }
 
 /** "claude in sage", one per program in front of a shell. */
-async function runningPrograms(socketFile = socketPath()): Promise<string[]> {
+/**
+ * With `restart`, only what a restart would lose: programs that won't come
+ * back, and ones that will but are mid-task (a Claude turn), marked so.
+ */
+async function runningPrograms(socketFile = socketPath(), { restart = false } = {}): Promise<string[]> {
+  type Running = { program: string; cwd: string | null; kept?: boolean; active?: boolean };
   const result = await daemonGet("/api/running", socketFile);
   if (Array.isArray(result?.running)) {
-    return result.running.map(({ program, cwd }: { program: string; cwd: string | null }) =>
-      cwd ? `${program} in ${displayPath(cwd, settings.hidePathPrefix, app.getPath("home"))}` : program,
-    );
+    return (result.running as Running[])
+      // A daemon from before `kept` comes back with nothing.
+      .filter(({ kept, active }) => !restart || !kept || active)
+      .map(({ program, cwd, kept, active }) => {
+        const where = cwd ? ` in ${displayPath(cwd, settings.hidePathPrefix, app.getPath("home"))}` : "";
+        return `${program}${where}${restart && kept && active ? " (mid-task)" : ""}`;
+      });
   }
 
   // A daemon from before /api/running: all we can say is how many terminals.
