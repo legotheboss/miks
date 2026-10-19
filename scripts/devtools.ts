@@ -2,7 +2,7 @@
 //
 //   node scripts/devtools.ts screenshot [out.png]   Saves the window as a PNG.
 //   node scripts/devtools.ts eval '<js>'            Prints the result of <js> in the page.
-//   node scripts/devtools.ts drop <file>...          Drops files on the terminal, as from Finder.
+//   node scripts/devtools.ts drop [--cmd] <file>...  Drops files on the terminal, as from Finder (holding ⌘).
 //
 // For checking UI work without OS screen-recording permissions.
 import fs from "fs";
@@ -57,10 +57,13 @@ if (command === "screenshot") {
     returnByValue: true,
   });
   const [x, y] = result.value;
-  const data = { items: [], files: process.argv.slice(3), dragOperationsMask: 1 };
-  for (const type of ["dragEnter", "dragOver", "drop"]) await call("Input.dispatchDragEvent", { type, x, y, data });
+  const files = process.argv.slice(3);
+  // CDP's modifier bits: 4 is ⌘.
+  const modifiers = files[0] === "--cmd" ? (files.shift(), 4) : 0;
+  const data = { items: [], files, dragOperationsMask: 1 };
+  for (const type of ["dragEnter", "dragOver", "drop"]) await call("Input.dispatchDragEvent", { type, x, y, data, modifiers });
 } else {
-  console.error("Usage: node scripts/devtools.ts screenshot [out.png] | eval '<js>' | drop <file>...");
+  console.error("Usage: node scripts/devtools.ts screenshot [out.png] | eval '<js>' | drop [--cmd] <file>...");
   process.exit(1);
 }
 

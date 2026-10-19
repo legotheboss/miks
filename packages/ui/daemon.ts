@@ -15,7 +15,7 @@ export type MiksBridge = {
   onStatus(listener: (status: { connected: boolean; error?: string; retrying?: boolean }) => void): Unsubscribe;
   onCommand(listener: (command: string) => void): Unsubscribe;
   pathForFile(file: File): string;
-  sendFiles(tabId: string, paths: string[]): Promise<string[]>;
+  sendFiles(tabId: string, paths: string[], into: "tmp" | "cwd"): Promise<string[]>;
   getSettings(): Settings;
   setSettings(changes: Partial<Settings>): void;
   onSettings(listener: (settings: Settings) => void): Unsubscribe;

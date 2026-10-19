@@ -500,27 +500,23 @@ ipcMain.handle("miks:confirm", async (event, { message, detail, button }: { mess
   return response === 0;
 });
 
-// Files dropped on a window on another Mac, which can't use this one's paths.
-// Images go to its temporary folder, typed as full paths so Claude Code
-// attaches them as it does a local drop; anything else, folders included, is
-// copied into the tab's folder, and typed by name. Each is a tar stream to
-// the daemon through the tunnel, so size and folders are no trouble.
-const IMAGE = /\.(png|jpe?g|gif|webp)$/i;
-
-ipcMain.handle("miks:sendFiles", async (event, tabId: string, paths: string[]) => {
+// Dropped files, copied by the daemon: into a temporary folder for a window
+// on another Mac, which can't use this one's paths (a local window types
+// them as they are), or into the tab's folder (⌘). Each is a tar stream to
+// the daemon (through the tunnel, for a remote), so size and folders are no
+// trouble. Resolves with where each landed.
+ipcMain.handle("miks:sendFiles", async (event, tabId: string, paths: string[], into: "tmp" | "cwd") => {
   const remote = remoteFor(event.sender);
-  if (!remote) return paths;
-  const socketFile = await tunnelSocket(remote).catch(() => null);
+  if (!remote && into === "tmp") return paths;
+  const socketFile = remote ? await tunnelSocket(remote).catch(() => null) : socketPath();
   if (!socketFile) return [];
 
-  const typed: string[] = [];
+  const saved: string[] = [];
   for (const file of paths) {
-    const image = IMAGE.test(file) && fs.statSync(file, { throwIfNoEntry: false })?.isFile();
-    const into = image ? "tmp" : "cwd";
-    const saved = await sendFile(file, `/api/drop?pane=${encodeURIComponent(tabId)}&into=${into}`, socketFile);
-    if (saved) typed.push(image ? saved : path.posix.basename(saved));
+    const where = await sendFile(file, `/api/drop?pane=${encodeURIComponent(tabId)}&into=${into}`, socketFile);
+    if (where) saved.push(where);
   }
-  return typed;
+  return saved;
 });
 
 /** Streams a tar of `file` to a daemon; resolves with where it was saved, or null. */
