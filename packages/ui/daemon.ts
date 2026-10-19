@@ -15,6 +15,7 @@ export type MiksBridge = {
   onStatus(listener: (status: { connected: boolean; error?: string; retrying?: boolean }) => void): Unsubscribe;
   onCommand(listener: (command: string) => void): Unsubscribe;
   pathForFile(file: File): string;
+  sendFiles(tabId: string, paths: string[]): Promise<string[]>;
   getSettings(): Settings;
   setSettings(changes: Partial<Settings>): void;
   onSettings(listener: (settings: Settings) => void): Unsubscribe;
@@ -51,7 +52,6 @@ class DaemonClient {
   private snapshot: DaemonSnapshot = { state: null, connected: false, error: null, retrying: false };
   private readonly listeners = new Set<() => void>();
   private readonly streams = new Map<string, (event: PaneStreamEvent) => void>();
-  private readonly uploads = new Map<string, ((path: string | null) => void)[]>();
   private readonly connectListeners = new Set<() => void>();
   private readonly commandListeners = new Set<(command: string) => void>();
   private readonly bridge: MiksBridge | undefined = window.miks;
@@ -100,19 +100,6 @@ class DaemonClient {
     };
   }
 
-  /**
-   * Sends a file to the daemon's Mac (a window on another Mac can't use this
-   * one's paths) and resolves with where it was saved there.
-   */
-  upload(tabId: string, name: string, data: string): Promise<string | null> {
-    if (!this.snapshot.connected) return Promise.resolve(null);
-    return new Promise((resolve) => {
-      // Replies come in order, per tab.
-      this.uploads.set(tabId, [...(this.uploads.get(tabId) ?? []), resolve]);
-      this.send({ type: "upload", tabId, name, data });
-    });
-  }
-
   /** Called on every (re)connection, which is when terminals must attach. */
   onConnect(listener: () => void): Unsubscribe {
     this.connectListeners.add(listener);
@@ -149,8 +136,6 @@ class DaemonClient {
     switch (message.type) {
       case "state":
         return this.update({ state: message.state });
-      case "uploaded":
-        return this.uploads.get(message.tabId)?.shift()?.(message.path);
       case "snapshot":
       case "output": {
         const { tabId, ...event } = message;

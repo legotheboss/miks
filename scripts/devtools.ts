@@ -2,6 +2,7 @@
 //
 //   node scripts/devtools.ts screenshot [out.png]   Saves the window as a PNG.
 //   node scripts/devtools.ts eval '<js>'            Prints the result of <js> in the page.
+//   node scripts/devtools.ts drop <file>...          Drops files on the terminal, as from Finder.
 //
 // For checking UI work without OS screen-recording permissions.
 import fs from "fs";
@@ -50,8 +51,16 @@ if (command === "screenshot") {
   });
   if (exceptionDetails) throw new Error(exceptionDetails.exception?.description ?? exceptionDetails.text);
   console.log(typeof result.value === "string" ? result.value : JSON.stringify(result.value, null, 2));
+} else if (command === "drop") {
+  const { result } = await call("Runtime.evaluate", {
+    expression: `(() => { const r = document.querySelector(".terminals > [data-active=true]").getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`,
+    returnByValue: true,
+  });
+  const [x, y] = result.value;
+  const data = { items: [], files: process.argv.slice(3), dragOperationsMask: 1 };
+  for (const type of ["dragEnter", "dragOver", "drop"]) await call("Input.dispatchDragEvent", { type, x, y, data });
 } else {
-  console.error("Usage: node scripts/devtools.ts screenshot [out.png] | eval '<js>'");
+  console.error("Usage: node scripts/devtools.ts screenshot [out.png] | eval '<js>' | drop <file>...");
   process.exit(1);
 }
 

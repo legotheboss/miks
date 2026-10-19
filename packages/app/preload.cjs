@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld("miks", {
   focus: () => ipcRenderer.send("miks:focus"),
   /** The path of a dropped file; File.path no longer exists in Electron. */
   pathForFile: (file) => webUtils.getPathForFile(file),
+  /** Copies dropped files to a remote window's Mac; resolves with what to type there. */
+  sendFiles: (tabId, paths) => ipcRenderer.invoke("miks:sendFiles", tabId, paths),
 });
 
 function subscribe(channel, listener) {

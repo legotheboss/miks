@@ -500,6 +500,56 @@ ipcMain.handle("miks:confirm", async (event, { message, detail, button }: { mess
   return response === 0;
 });
 
+// Files dropped on a window on another Mac, which can't use this one's paths.
+// Images go to its temporary folder, typed as full paths so Claude Code
+// attaches them as it does a local drop; anything else, folders included, is
+// copied into the tab's folder, and typed by name. Each is a tar stream to
+// the daemon through the tunnel, so size and folders are no trouble.
+const IMAGE = /\.(png|jpe?g|gif|webp)$/i;
+
+ipcMain.handle("miks:sendFiles", async (event, tabId: string, paths: string[]) => {
+  const remote = remoteFor(event.sender);
+  if (!remote) return paths;
+  const socketFile = await tunnelSocket(remote).catch(() => null);
+  if (!socketFile) return [];
+
+  const typed: string[] = [];
+  for (const file of paths) {
+    const image = IMAGE.test(file) && fs.statSync(file, { throwIfNoEntry: false })?.isFile();
+    const into = image ? "tmp" : "cwd";
+    const saved = await sendFile(file, `/api/drop?pane=${encodeURIComponent(tabId)}&into=${into}`, socketFile);
+    if (saved) typed.push(image ? saved : path.posix.basename(saved));
+  }
+  return typed;
+});
+
+/** Streams a tar of `file` to a daemon; resolves with where it was saved, or null. */
+function sendFile(file: string, apiPath: string, socketFile: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    // COPYFILE_DISABLE: no AppleDouble "._" files for the extended attributes.
+    const tar = spawn("tar", ["-cf", "-", "-C", path.dirname(file), path.basename(file)], {
+      env: { ...process.env, COPYFILE_DISABLE: "1" },
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const request = http.request({ socketPath: socketFile, path: apiPath, method: "POST" }, (response) => {
+      let body = "";
+      response.on("data", (chunk) => (body += chunk));
+      response.on("end", () => {
+        try {
+          resolve(JSON.parse(body).path ?? null);
+        } catch {
+          resolve(null);
+        }
+      });
+    });
+    request.on("error", () => {
+      tar.kill();
+      resolve(null);
+    });
+    tar.stdout.pipe(request);
+  });
+}
+
 ipcMain.on("miks:copy", (_event, text: string) => {
   if (typeof text === "string") clipboard.writeText(text);
 });

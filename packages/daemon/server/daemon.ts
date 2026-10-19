@@ -1,3 +1,4 @@
+import { spawn } from "child_process";
 import fs from "fs";
 import http from "http";
 import net from "net";
@@ -102,6 +103,18 @@ export async function serve({
       });
     }
 
+    if (req.method === "POST" && url.pathname === "/api/drop") {
+      const pane = workspaces.getPane(url.searchParams.get("pane") ?? "");
+      const into = url.searchParams.get("into");
+      return (async () => {
+        const folder = into === "cwd" ? ((await pane?.cwd()) ?? os.homedir()) : fs.mkdtempSync(path.join(os.tmpdir(), "miks-drop-"));
+        return receiveDrop(req, folder);
+      })().then(
+        (saved) => json(res, 200, { path: saved }),
+        (error) => json(res, 500, { message: String(error?.message ?? error) }),
+      );
+    }
+
     if (req.method === "POST" && url.pathname === "/api/hook") {
       const pane = url.searchParams.get("pane");
       return readJson(req).then((payload) => {
@@ -202,8 +215,6 @@ export async function serve({
         }
         case "input":
           return workspaces.getPane(message.tabId)?.write(message.data);
-        case "upload":
-          return send({ type: "uploaded", tabId: message.tabId, path: saveUpload(message.name, message.data) });
         case "clear":
           return workspaces.getPane(message.tabId)?.clear();
         case "resize":
@@ -285,18 +296,38 @@ function persist(workspaces: Workspaces, statePath: string) {
 }
 
 /**
- * Saves a file dropped on a window on another Mac, under its own name in a
- * folder of its own (so two drops of "image.png" don't collide), in the
- * temporary folder macOS clears out on its own. Returns where, or null.
+ * Unpacks a file or folder dropped on a window on another Mac (a tar of it,
+ * streamed through the SSH tunnel) into `folder`, under its own name, or
+ * Finder's "name 2" when that's taken: never over anything. Returns where.
  */
-function saveUpload(name: string, data: string): string | null {
+async function receiveDrop(body: NodeJS.ReadableStream, folder: string): Promise<string> {
+  // Beside where it ends up, so moving it there is a rename.
+  const staging = fs.mkdtempSync(path.join(folder, ".miks-drop-"));
   try {
-    const folder = fs.mkdtempSync(path.join(os.tmpdir(), "miks-drop-"));
-    const file = path.join(folder, path.basename(name) || "file");
-    fs.writeFileSync(file, Buffer.from(data, "base64"));
-    return file;
-  } catch {
-    return null;
+    const tar = spawn("tar", ["-xf", "-", "-C", staging], { stdio: ["pipe", "ignore", "pipe"] });
+    let errors = "";
+    tar.stderr.on("data", (chunk) => (errors += chunk));
+    body.pipe(tar.stdin);
+    const code = await new Promise<number | null>((resolve) => tar.on("close", resolve));
+    if (code !== 0) throw new Error(errors.trim() || `tar exited with ${code}.`);
+
+    const [name, ...extra] = fs.readdirSync(staging);
+    if (!name || extra.length > 0) throw new Error("Expected one file or folder.");
+    const saved = freeName(folder, name);
+    fs.renameSync(path.join(staging, name), saved);
+    return saved;
+  } finally {
+    fs.rmSync(staging, { recursive: true, force: true });
+  }
+}
+
+/** `name` in `folder`, or "name 2", "name 3"… (before any extension) if taken. */
+function freeName(folder: string, name: string): string {
+  const ext = path.extname(name);
+  const stem = name.slice(0, name.length - ext.length);
+  for (let i = 1; ; i++) {
+    const candidate = path.join(folder, i === 1 ? name : `${stem} ${i}${ext}`);
+    if (!fs.existsSync(candidate)) return candidate;
   }
 }
 

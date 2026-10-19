@@ -18,6 +18,9 @@ I enjoyed [cmux](https://github.com/manaflow-ai/cmux) until I realized it bundle
   its Claude session, resumed. `miks keep <command>` brings back your own
   long-running commands the same way
 - Follows light and dark mode, and tells Claude Code when it changes
+- Remote windows: a window on another Mac's terminals, over SSH, with
+  copying landing on the Mac you're at and dropped files sent over
+  (images for Claude Code, anything else into the tab's folder)
 - Drop files in to type their paths. Drop a folder on the Dock icon, or
   `open -a Miks <folder>`, for a workspace there (so it works as GitHub
   Desktop's custom shell)

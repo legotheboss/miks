@@ -6,7 +6,7 @@
  * Bumped when a message changes shape or appears, so a UI talking to another
  * Mac's daemon can tell it's a different Miks. Before 2 there was none.
  */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 /**
  * What a coding agent in a pane is up to, as reported by its hooks.
@@ -90,11 +90,6 @@ export type ClientMessage =
   | { type: "attach"; tabId: string; cols?: number; rows?: number }
   | { type: "detach"; tabId: string }
   /**
-   * A file dropped on a window on another Mac, which can't see the dropper's
-   * paths: the daemon saves it and answers `uploaded` with where.
-   */
-  | { type: "upload"; tabId: string; name: string; data: string }
-  /**
    * From the Mac's own Miks: true when it quit while a window on another Mac
    * still had the daemon, which then stops once the last window goes; false
    * when it's back, taking the daemon over again. Since protocol 3.
@@ -113,8 +108,6 @@ export type DaemonMessage =
   | { type: "state"; state: DaemonState }
   /** The pane's screen and scrollback as VT sequences, to write into a fresh terminal. */
   | { type: "snapshot"; tabId: string; data: string; cols: number; rows: number }
-  | { type: "output"; tabId: string; data: string }
-  /** Where an `upload` landed, on the daemon's Mac; null if it couldn't be saved. */
-  | { type: "uploaded"; tabId: string; path: string | null };
+  | { type: "output"; tabId: string; data: string };
 
 // A pane whose program exits simply disappears from the next `state`.

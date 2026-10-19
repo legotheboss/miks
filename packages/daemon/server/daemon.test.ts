@@ -437,21 +437,36 @@ test("zsh reads your startup files, gives ZDOTDIR back, and marks each command",
   }
 });
 
-test("a file dropped on another Mac's window is saved here, and its path sent back", async () => {
+test("a folder dropped on another Mac's window lands in the tab's folder, never over anything", async () => {
   daemon.workspaces.createWorkspace({ cwd: home });
-  const client = await connect();
-  const tabId = activeTab(await client.state());
+  const tabId = activeTab(daemon.workspaces.getState());
+  const source = fs.mkdtempSync(path.join(os.tmpdir(), "miks-source-"));
+  fs.mkdirSync(path.join(source, "my stuff", "inner"), { recursive: true });
+  fs.writeFileSync(path.join(source, "my stuff", "inner", "notes.txt"), "hi");
 
-  client.send({ type: "upload", tabId, name: "../screen shot.png", data: Buffer.from("PNG!").toString("base64") });
-  const reply = await client.next((message) => message.type === "uploaded");
+  const first = await drop(`/api/drop?pane=${tabId}&into=cwd`, source, "my stuff");
+  expect(first).toBe(path.join(fs.realpathSync(home), "my stuff"));
+  expect(fs.readFileSync(path.join(first, "inner", "notes.txt"), "utf8")).toBe("hi");
 
-  expect(reply).toMatchObject({ type: "uploaded", tabId });
-  const saved = (reply as any).path as string;
-  // Only the name survives, never a path out of the folder.
+  // Dropped again, it's a second copy.
+  expect(await drop(`/api/drop?pane=${tabId}&into=cwd`, source, "my stuff")).toBe(`${first} 2`);
+  // And nothing's left over.
+  expect(fs.readdirSync(home).filter((name) => name.startsWith(".miks-drop-"))).toEqual([]);
+  fs.rmSync(source, { recursive: true });
+});
+
+test("an image dropped on another Mac's window goes to a temporary folder", async () => {
+  daemon.workspaces.createWorkspace({ cwd: home });
+  const tabId = activeTab(daemon.workspaces.getState());
+  const source = fs.mkdtempSync(path.join(os.tmpdir(), "miks-source-"));
+  fs.writeFileSync(path.join(source, "screen shot.png"), "PNG!");
+
+  const saved = await drop(`/api/drop?pane=${tabId}&into=tmp`, source, "screen shot.png");
   expect(path.basename(saved)).toBe("screen shot.png");
   expect(fs.readFileSync(saved, "utf8")).toBe("PNG!");
+  expect(fs.readdirSync(home)).not.toContain("screen shot.png");
   fs.rmSync(path.dirname(saved), { recursive: true });
-  client.close();
+  fs.rmSync(source, { recursive: true });
 });
 
 test("in zsh, ⌥← moves back a word", async () => {
@@ -720,6 +735,22 @@ async function apiPostText(apiPath: string, body: string): Promise<number> {
     });
     req.on("error", reject);
     req.end(body);
+  });
+}
+
+/** POSTs a tar of `name` in `folder`, as Miks.app does a drop; resolves with where it was saved. */
+async function drop(apiPath: string, folder: string, name: string): Promise<string> {
+  const http = await import("http");
+  const { execFileSync } = await import("child_process");
+  const tar = execFileSync("tar", ["-cf", "-", "-C", folder, name], { env: { ...process.env, COPYFILE_DISABLE: "1" } });
+  return new Promise((resolve, reject) => {
+    const req = http.request({ socketPath: path.join(home, "miks.sock"), path: apiPath, method: "POST" }, (res) => {
+      let body = "";
+      res.on("data", (chunk) => (body += chunk));
+      res.on("end", () => resolve(JSON.parse(body).path));
+    });
+    req.on("error", reject);
+    req.end(tar);
   });
 }
 

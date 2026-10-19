@@ -162,13 +162,14 @@ export function TerminalView({
   }, [active]);
 
   // Dropping files types their paths, escaped the way Terminal.app does it,
-  // which is also how Claude Code recognizes a dropped image.
+  // which is also how Claude Code recognizes a dropped image. On a window on
+  // another Mac they're sent there first (see `miks:sendFiles`).
   async function onDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
-    const files = Array.from(event.dataTransfer.files);
-    const paths = isRemote()
-      ? await uploadFiles(tabId, files)
-      : (files.map((file) => window.miks?.pathForFile(file)).filter(Boolean) as string[]);
+    const dropped = Array.from(event.dataTransfer.files)
+      .map((file) => window.miks?.pathForFile(file))
+      .filter(Boolean) as string[];
+    const paths = isRemote() && dropped.length > 0 ? await window.miks!.sendFiles(tabId, dropped) : dropped;
     if (paths.length === 0) return;
 
     viewRef.current?.terminal.paste(paths.map(shellEscape).join(" ") + " ");
@@ -184,34 +185,6 @@ export function TerminalView({
       {...rest}
     />
   );
-}
-
-/**
- * On a window on another Mac, a dropped file goes there first, and its path
- * there is what gets typed. Folders (which read as nothing) and anything over
- * 25 MB stay behind.
- */
-async function uploadFiles(tabId: string, files: File[]): Promise<string[]> {
-  const paths: string[] = [];
-  for (const file of files) {
-    if (file.size === 0 || file.size > 25 * 1024 * 1024) continue;
-    let bytes: Uint8Array;
-    try {
-      bytes = new Uint8Array(await file.arrayBuffer());
-    } catch {
-      continue; // A folder.
-    }
-    const path = await daemon.upload(tabId, file.name, base64(bytes));
-    if (path) paths.push(path);
-  }
-  return paths;
-}
-
-function base64(bytes: Uint8Array): string {
-  let binary = "";
-  // In chunks: String.fromCharCode takes arguments, and there are only so many.
-  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(binary);
 }
 
 function shellEscape(path: string): string {
