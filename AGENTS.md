@@ -66,7 +66,15 @@ Never SIGTERM a Miks UI; that's an ordinary quit.
   installs a downloaded update on any quit, and swaps the bundle, so a daemon
   kept running ("Keep terminals running") is left on the old one.
   `MIKS_UPDATE_FEED` points a packaged copy at a test feed; verified that way
-  against a local `python3 -m http.server`.
+  against a local `python3 -m http.server`. `miks update` (Miks's `.zshrc`)
+  updates the Mac its terminal is on, so a remote window can: it opens
+  `miks://update?status=<file>` (`CFBundleURLTypes`; `open-url` in main),
+  and the app checks, downloads and installs without dialogs, appending each
+  step to the file, which the command prints. A second `checkForUpdates`
+  while one runs fails ("The command is disabled"), so there's one at a
+  time. Testing it: Squirrel relaunches the updated copy without the test's
+  environment, so on the real Miks home; catch it and SIGUSR2 it. And
+  `lsregister -u` test copies, or `miks://` may go to them.
 - Remote windows (Settings → Remotes; the Remotes menu, ⌃⌥⌘1–9): a window on
   another Mac's daemon through `ssh -N -L <local sock>:<remote sock>`
   (`packages/app/tunnels.ts`), so no daemon ever listens on the network. One
@@ -153,6 +161,10 @@ resizes); keep it passing.
   cursor's line counts as a prompt. Clear to start (⌘K) clears the UI's
   terminal and, by a `clear` message, the daemon's, or the next attach would
   bring it back.
+- macOS's `/etc/zshrc` sets `HISTFILE=${ZDOTDIR:-$HOME}/.zsh_history`, and
+  runs while ZDOTDIR is Miks's folder: without a HISTFILE of your own,
+  history went inside Miks.app (invalidating its signature) until `.zshrc`
+  put it back.
 - Each tab has its own zsh history, like Terminal.app's: a `historyId` saved
   in `state.json`, and `MIKS_HISTORY` (`<home>/history/<id>.zsh`), which
   Miks's `.zshrc` appends each command to in preexec (zsh's history format)

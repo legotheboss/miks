@@ -19,7 +19,7 @@ I enjoyed [cmux](https://github.com/manaflow-ai/cmux) until I realized it bundle
   long-running commands the same way
 - Follows light and dark mode, and tells Claude Code when it changes
 - Remote windows: a window on another Mac's terminals, over SSH, with
-  copying landing on the Mac you're at and dropped files sent over
+  copying landing on the Mac you're at and dropped files sent over. `miks update` in one updates Miks on that Mac
 - Drop files in to type their paths, or hold ⌥ to copy them into the tab's
   folder
 - Drop a folder on the Dock icon, or

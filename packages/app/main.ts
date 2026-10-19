@@ -11,7 +11,7 @@ import os from "os";
 import type { WebSocket } from "ws";
 import { syncClaudeHooks } from "./claudeHooks.ts";
 import { stopAllTunnels, stopTunnel, tunnelSocket } from "./tunnels.ts";
-import { checkForUpdates, startUpdates } from "./updates.ts";
+import { checkForUpdates, startUpdates, updateFromShell } from "./updates.ts";
 
 // The Electron shell is deliberately thin: windows, a menu, and a pipe
 // between each window and a daemon's Unix socket (which the renderer can't
@@ -630,6 +630,15 @@ const pendingFolders: string[] = [];
 app.on("open-file", (event, file) => {
   event.preventDefault();
   openFolder(file);
+});
+
+// miks://update?status=<file>, from `miks update` in a terminal (Miks's zsh),
+// opened on whichever Mac that terminal is on.
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  const parsed = new URL(url);
+  const status = parsed.searchParams.get("status");
+  if (parsed.host === "update" && status) app.whenReady().then(() => updateFromShell(status));
 });
 
 // Or given as arguments, launching Miks.app's binary directly.

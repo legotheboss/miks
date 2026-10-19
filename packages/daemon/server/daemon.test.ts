@@ -437,6 +437,21 @@ test("zsh reads your startup files, gives ZDOTDIR back, and marks each command",
   }
 });
 
+test("zsh's history is yours, not saved inside Miks's own folder", async () => {
+  fs.writeFileSync(path.join(home, ".zshrc"), "PS1='%% '\n");
+  const pane = new Pane({ id: "zsh", cwd: home, env: { HOME: home }, command: ["/bin/zsh", "-l"] });
+  let output = "";
+  pane.attach({ snapshot: () => {}, output: (data) => (output += data) });
+  try {
+    await waitFor(() => output.includes("\x1b]133;A\x07"));
+    pane.write("echo histfile:$HISTFILE\n");
+    await waitFor(() => /\x1b\]133;D;0\x07/.test(output));
+    expect(output).toContain(`histfile:${home}/.zsh_history`);
+  } finally {
+    pane.kill();
+  }
+});
+
 test("a folder dropped on another Mac's window lands in the tab's folder, never over anything", async () => {
   daemon.workspaces.createWorkspace({ cwd: home });
   const tabId = activeTab(daemon.workspaces.getState());

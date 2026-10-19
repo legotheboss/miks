@@ -121,6 +121,8 @@ export async function buildApp(): Promise<string> {
       CFBundleDocumentTypes: [
         { CFBundleTypeName: "Folder", CFBundleTypeRole: "Viewer", LSHandlerRank: "None", LSItemContentTypes: ["public.folder"] },
       ],
+      // miks://update, which `miks update` opens.
+      CFBundleURLTypes: [{ CFBundleURLName: "com.nfarina.miks", CFBundleURLSchemes: ["miks"] }],
       NSAppleEventsUsageDescription: usage("other apps through AppleScript"),
       NSBluetoothAlwaysUsageDescription: usage("Bluetooth"),
       NSCalendarsFullAccessUsageDescription: usage("your calendars"),

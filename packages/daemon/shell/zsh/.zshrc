@@ -1,3 +1,8 @@
+# macOS's /etc/zshrc, just run, set HISTFILE from ZDOTDIR, which was this
+# folder: history would be saved inside Miks.app (breaking its signature, and
+# lost with every update). Put it where it'd be without Miks, before yours.
+[[ $HISTFILE == $__miks_zdotdir/* ]] && HISTFILE=${MIKS_USER_ZDOTDIR:-$HOME}/.zsh_history
+
 ZDOTDIR=$MIKS_USER_ZDOTDIR
 [[ -f $ZDOTDIR/.zshrc ]] && builtin source "$ZDOTDIR/.zshrc"
 MIKS_USER_ZDOTDIR=$ZDOTDIR
@@ -37,17 +42,56 @@ fi
 # still running (a daemon restart, quitting and reopening), runs it again
 # there. It stops being kept once it ends, however it ends.
 miks() {
-  if [[ $1 != keep || $# -lt 2 ]]; then
+  case $1 in
+    keep) shift; __miks_keep "$@" ;;
+    update) __miks_update ;;
+    *)
+      builtin print -u2 "Usage: miks keep <command> [arguments...]"
+      builtin print -u2 "       miks update"
+      return 2
+      ;;
+  esac
+}
+
+__miks_keep() {
+  if (( $# == 0 )); then
     builtin print -u2 "Usage: miks keep <command> [arguments...]"
     return 2
   fi
-  shift
   if [[ -n $MIKS_PANE_ID && -S $MIKS_SOCKET ]]; then
     # Quoted for the shell that runs it again.
     builtin print -rn -- "${(j: :)${(q-)@}}" |
       curl -sf -m 2 --unix-socket "$MIKS_SOCKET" --data-binary @- "http://miks/api/keep?pane=$MIKS_PANE_ID" >/dev/null
   fi
   "$@"
+}
+
+# Updates Miks on this Mac, wherever you're typing from: the app reports each
+# step to a file, printed here as it goes.
+__miks_update() {
+  local file
+  file=$(mktemp "${TMPDIR:-/tmp}/miks-update-XXXXXX") || return 1
+  if ! open -g "miks://update?status=$file"; then
+    rm -f "$file"
+    return 1
+  fi
+  local -i printed=0 deadline=$(( SECONDS + 600 ))
+  local -a lines
+  while (( SECONDS < deadline )); do
+    lines=("${(@f)$(<$file)}")
+    while (( printed < ${#lines} )) && [[ -n ${lines[printed + 1]} ]]; do
+      (( printed++ ))
+      if [[ ${lines[printed]} == END ]]; then
+        rm -f "$file"
+        return 0
+      fi
+      builtin print -r -- "${lines[printed]}"
+    done
+    sleep 0.3
+  done
+  rm -f "$file"
+  builtin print -u2 "Miks didn't answer."
+  return 1
 }
 
 # Marks around each command (OSC 133, as Ghostty, iTerm and VS Code read
