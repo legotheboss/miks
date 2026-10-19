@@ -502,7 +502,7 @@ ipcMain.handle("miks:confirm", async (event, { message, detail, button }: { mess
 
 // Dropped files, copied by the daemon: into a temporary folder for a window
 // on another Mac, which can't use this one's paths (a local window types
-// them as they are), or into the tab's folder (⌘). Each is a tar stream to
+// them as they are), or into the tab's folder (⌥). Each is a tar stream to
 // the daemon (through the tunnel, for a remote), so size and folders are no
 // trouble. Resolves with where each landed.
 ipcMain.handle("miks:sendFiles", async (event, tabId: string, paths: string[], into: "tmp" | "cwd") => {

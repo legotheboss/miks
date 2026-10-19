@@ -166,7 +166,7 @@ export function TerminalView({
 
   // Dropping files types their paths, escaped the way Terminal.app does it,
   // which is also how Claude Code recognizes a dropped image. On a window on
-  // another Mac they're copied to a temporary folder there first. With ⌘ held
+  // another Mac they're copied to a temporary folder there first. With ⌥ held
   // they're copied into the tab's folder instead (on either Mac), and nothing
   // is typed.
   async function onDrop(event: DragEvent<HTMLDivElement>) {
@@ -176,7 +176,7 @@ export function TerminalView({
       .filter(Boolean) as string[];
     if (dropped.length === 0 || !window.miks) return;
 
-    if (event.metaKey) {
+    if (event.altKey) {
       const saved = await window.miks.sendFiles(tabId, dropped, "cwd");
       if (saved.length === 0) return showToast({ title: "Couldn't copy into this folder", destructive: true });
       const folder = saved[0].slice(0, saved[0].lastIndexOf("/"));
@@ -200,7 +200,7 @@ export function TerminalView({
       data-active={active}
       onDragOver={(event) => {
         event.preventDefault();
-        // Never "move" (⌘ in Finder): the original stays where it was.
+        // Finder's "+": what it does with ⌥ held, and never a move.
         event.dataTransfer.dropEffect = "copy";
       }}
       onDrop={onDrop}

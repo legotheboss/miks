@@ -74,12 +74,12 @@ Never SIGTERM a Miks UI; that's an ordinary quit.
   daemon call must go to it. A remote window never starts, stops or restarts
   a daemon: quitting stops only this Mac's. It retries every 3s on its own.
   Dropped files are copied to its tmpdir and typed as full paths, so Claude
-  Code attaches images as it does a local drop; with ⌘ held (any window),
+  Code attaches images as it does a local drop; with ⌥ held (any window),
   into the tab's folder instead ("name 2" if taken), with a toast, typing
   nothing. Both are `miks:sendFiles` in main: a tar stream per file to
-  `POST /api/drop` (through the tunnel, for a remote). Drags are always
-  "copy", so ⌘ never tells Finder to move the original.
-  `scripts/devtools.ts drop <file>...` drops real files, as from Finder.
+  `POST /api/drop` (through the tunnel, for a remote). ⌥ because it's
+  Finder's copy modifier; ⌘ (move, to Finder) didn't work from Finder.
+  `scripts/devtools.ts drop [--alt] <file>...` drops real files, as from Finder.
   Focusing a window re-sends its size and appearance, so the Mac you're at
   wins. Open remote windows reopen at launch (`UI/remote-windows.json`).
   `PROTOCOL_VERSION` warns when two Miks disagree. A Mac's Miks quitting
