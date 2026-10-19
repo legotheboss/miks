@@ -213,7 +213,7 @@ async function restartDaemon(window: BrowserWindow | undefined) {
   // A restart brings every tab back, in its folder with its history, along
   // with its kept command or Claude session; it asks only about what won't
   // come back, or would be cut off mid-task.
-  const lost = await runningPrograms(socketFile, { restart: true });
+  const lost = await runningPrograms(socketFile, { restored: true });
   if (lost.length > 0) {
     const shown = lost.slice(0, 8);
     const more = lost.length - shown.length;
@@ -372,12 +372,13 @@ function confirmRemoteClose(window: BrowserWindow) {
       const ping = socketFile ? await daemonGet("/api/ping", socketFile) : null;
       let close = true;
       if (socketFile && ping?.stopWhenIdle && (ping.clients ?? 0) <= 1) {
-        const running = await runningPrograms(socketFile);
+        // Its Miks brings every tab back when it next opens.
+        const running = await runningPrograms(socketFile, { restored: true });
         if (running.length > 0) {
           const { response } = await show(window, {
             type: "warning",
             message: "Close this window?",
-            detail: `Miks on ${remote.name} has quit, so closing its last window stops its terminals:\n\n${running.slice(0, 8).join("\n")}`,
+            detail: `Miks on ${remote.name} has quit, so closing its last window stops what's running in these (the tabs come back when it opens again):\n\n${running.slice(0, 8).join("\n")}`,
             buttons: ["Close", "Cancel"],
             defaultId: 0,
             cancelId: 1,
@@ -774,7 +775,8 @@ app.on("window-all-closed", () => app.quit());
 
 //
 // Quitting. Like any terminal app, quitting ends the terminals (it stops the
-// daemon), asking first if programs are running in them. Except: with
+// daemon), asking first about programs running in them that the next launch
+// won't bring back, or would cut off mid-task. Except: with
 // "Keep terminals running" on; when another window still uses the daemon (the
 // dev build beside Miks.app); and when install-app relaunches us (SIGUSR2).
 // The daemon saves its layout as it stops, so the next launch brings it back
@@ -827,7 +829,9 @@ async function stopDaemonForQuit(): Promise<boolean> {
     return true;
   }
 
-  const running = await runningPrograms();
+  // The next launch brings every tab back, with its kept command or Claude
+  // session; only what that won't restore, or would cut short, is worth asking.
+  const running = await runningPrograms(socketPath(), { restored: true });
   if (running.length > 0) {
     const shown = running.slice(0, 8);
     const more = running.length - shown.length;
@@ -835,7 +839,7 @@ async function stopDaemonForQuit(): Promise<boolean> {
       type: "warning" as const,
       message: "Quit Miks?",
       detail:
-        `Quitting stops what's running in its terminals:\n\n${shown.join("\n")}` +
+        `Every tab comes back next time, but quitting stops what's running in these:\n\n${shown.join("\n")}` +
         (more ? `\nand ${more} more` : "") +
         `\n\nTo keep terminals running after Miks quits, turn on "Keep terminals running" in Settings.`,
       buttons: ["Quit", "Cancel"],
@@ -858,19 +862,20 @@ async function stopDaemonForQuit(): Promise<boolean> {
 
 /** "claude in sage", one per program in front of a shell. */
 /**
- * With `restart`, only what a restart would lose: programs that won't come
- * back, and ones that will but are mid-task (a Claude turn), marked so.
+ * With `restored` (the daemon is stopping but its layout comes back: a
+ * restart, or Miks opening again), only what that would lose: programs that
+ * won't come back, and ones that will but are mid-task (a Claude turn).
  */
-async function runningPrograms(socketFile = socketPath(), { restart = false } = {}): Promise<string[]> {
+async function runningPrograms(socketFile = socketPath(), { restored = false } = {}): Promise<string[]> {
   type Running = { program: string; cwd: string | null; kept?: boolean; active?: boolean };
   const result = await daemonGet("/api/running", socketFile);
   if (Array.isArray(result?.running)) {
     return (result.running as Running[])
       // A daemon from before `kept` comes back with nothing.
-      .filter(({ kept, active }) => !restart || !kept || active)
+      .filter(({ kept, active }) => !restored || !kept || active)
       .map(({ program, cwd, kept, active }) => {
         const where = cwd ? ` in ${displayPath(cwd, settings.hidePathPrefix, app.getPath("home"))}` : "";
-        return `${program}${where}${restart && kept && active ? " (mid-task)" : ""}`;
+        return `${program}${where}${restored && kept && active ? " (mid-task)" : ""}`;
       });
   }
 

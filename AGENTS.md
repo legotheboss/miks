@@ -23,8 +23,9 @@ it exists because cmux grew far past that.
 The point of the split: **reloading or relaunching the UI never touches a
 session**. Stopping the daemon does, and that kills every terminal; say so
 before doing it to the real one. Quitting Miks (⌘Q, or the last window
-closing) does stop it, like any terminal app, after asking if programs are
-running in front of a shell, unless "Keep terminals running" is on or another
+closing) does stop it, like any terminal app, after asking about programs
+the next launch won't restore (`kept` in `/api/running`) or that are
+mid-task (`active`), unless "Keep terminals running" is on or another
 UI is still connected (`clients` in `/api/ping`). SIGUSR2 is the quit that
 always leaves it running: `install:app` and `yarn dev`'s restarts send that.
 Never SIGTERM a Miks UI; that's an ordinary quit.
