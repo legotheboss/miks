@@ -128,6 +128,10 @@ export async function buildApp(): Promise<string> {
       NSCameraUsageDescription: usage("the camera"),
       NSContactsUsageDescription: usage("your contacts"),
       NSLocationUsageDescription: usage("your location"),
+      // Without it macOS never asks, and connections from terminals to other
+      // machines on your network fail at random ("Undefined error: 0" from
+      // ssh), though the internet, and anything over a VPN, work.
+      NSLocalNetworkUsageDescription: usage("devices on your local network"),
       NSMicrophoneUsageDescription: usage("the microphone"),
       NSPhotoLibraryUsageDescription: usage("your photos"),
       NSRemindersFullAccessUsageDescription: usage("your reminders"),

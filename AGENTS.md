@@ -116,6 +116,11 @@ resizes); keep it passing.
 - Inside Miks.app, `node_modules/miks` is a stub package re-exporting
   `packages/daemon/shared`: Node won't strip types under node_modules, and the
   packager rewrites symlinks to absolute paths, which codesign rejects.
+- macOS's Local Network privacy applies to everything in Miks's terminals:
+  without `NSLocalNetworkUsageDescription` it never asked, and pings and
+  connections to LAN machines failed at random ("Undefined error: 0" from
+  ssh) while the router, the internet and VPN paths worked. Verified by
+  running the same commands from a `launchctl submit` job, outside Miks.
 - `open` passes the calling shell's environment, so launching Miks.app from a
   Miks pane used to carry that pane's variables in.
 - Third-party install scripts are off globally; `scripts/postinstall.ts` does
