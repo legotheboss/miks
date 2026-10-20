@@ -442,6 +442,28 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
     focusComposer();
   }
 
+  // Where a jump (↑ or ↓) is scrolling to, until it gets there: pressing
+  // again on the way goes on from there, not from wherever the scroll is.
+  const jumpingTo = useRef<number | null>(null);
+
+  /** Scrolls to the previous or next of your messages and final replies. */
+  function jump(direction: -1 | 1) {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+
+    const from = jumpingTo.current ?? scroller.scrollTop;
+    const stops = [...scroller.querySelectorAll<HTMLElement>(":scope > .prompt:not([data-pending]), :scope > .final-reply")]
+      // A little above each, so it isn't flush with the top.
+      .map((stop) => Math.max(stop.offsetTop - 16, 0));
+    const bottom = scroller.scrollHeight - scroller.clientHeight;
+    const next =
+      direction > 0 ? (stops.find((top) => top > from + 2) ?? bottom) : (stops.findLast((top) => top < from - 2) ?? 0);
+
+    const target = Math.min(next, bottom);
+    jumpingTo.current = target;
+    scroller.scrollTo({ top: target, behavior: "smooth" });
+  }
+
   // Code's copy buttons, and links (which open in the browser).
   function onClick(event: MouseEvent) {
     const target = event.target as HTMLElement;
@@ -476,13 +498,19 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
           const scroller = event.currentTarget;
           atBottom.current = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40;
         }}
+        onScrollEnd={() => (jumpingTo.current = null)}
         // Focusable, so a click in the conversation puts the keyboard here,
-        // where / goes to the composer and Escape back to the terminal.
+        // where / goes to the composer, ↑ and ↓ jump between your messages
+        // and replies, and Escape goes back to the terminal.
         tabIndex={-1}
         onKeyDown={(event) => {
-          if (event.key === "/" && !event.metaKey && !event.ctrlKey && !event.altKey) {
+          const plain = !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
+          if (event.key === "/" && plain) {
             event.preventDefault();
             focusComposer();
+          } else if ((event.key === "ArrowUp" || event.key === "ArrowDown") && plain) {
+            event.preventDefault();
+            jump(event.key === "ArrowUp" ? -1 : 1);
           } else if (event.key === "Escape") {
             event.preventDefault();
             leave();
