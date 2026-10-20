@@ -16,6 +16,8 @@ export type MiksBridge = {
   onCommand(listener: (command: string) => void): Unsubscribe;
   pathForFile(file: File): string;
   sendFiles(tabId: string, paths: string[], into: "tmp" | "cwd"): Promise<string[]>;
+  /** Whether there's an image on the clipboard, and in a window on another Mac, where it went there. */
+  sendClipboardImage(tabId: string): Promise<{ image: boolean; path?: string }>;
   getSettings(): Settings;
   setSettings(changes: Partial<Settings>): void;
   onSettings(listener: (settings: Settings) => void): Unsubscribe;

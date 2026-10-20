@@ -610,6 +610,34 @@ ipcMain.handle("miks:sendFiles", async (event, tabId: string, paths: string[], i
   return saved;
 });
 
+/**
+ * ⌃V, Claude Code's paste of an image, as a window can do it. Claude reads
+ * the clipboard of the Mac it runs on, so in a window on another Mac the
+ * image (this Mac's) goes over as a dropped one does, into a temporary
+ * folder there, and the window types its path. Says whether there's an
+ * image at all, either way.
+ */
+ipcMain.handle("miks:sendClipboardImage", async (event, tabId: string) => {
+  const item = (await clipboard.read()).find((entry) => entry.types.some((type) => type.startsWith("image/")));
+  const type = item?.types.find((entry) => entry.startsWith("image/"));
+  if (!item || !type) return { image: false };
+  const remote = remoteFor(event.sender);
+  if (!remote) return { image: true };
+
+  const socketFile = await tunnelSocket(remote).catch(() => null);
+  if (!socketFile) return { image: true };
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), "miks-paste-"));
+  try {
+    const file = path.join(folder, `pasted-image.${type.slice("image/".length).replace("jpeg", "jpg")}`);
+    const blob = (await item.getType(type)) as Blob;
+    fs.writeFileSync(file, Buffer.from(await blob.arrayBuffer()));
+    const where = await sendFile(file, `/api/drop?pane=${encodeURIComponent(tabId)}&into=tmp`, socketFile);
+    return { image: true, path: where ?? undefined };
+  } finally {
+    fs.rmSync(folder, { recursive: true, force: true });
+  }
+});
+
 /** Streams a tar of `file` to a daemon; resolves with where it was saved, or null. */
 function sendFile(file: string, apiPath: string, socketFile: string): Promise<string | null> {
   return new Promise((resolve) => {

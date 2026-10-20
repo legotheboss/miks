@@ -54,6 +54,13 @@ export function TerminalView({
     views.set(tabId, view);
 
     terminal.loadAddon(fit);
+    // ⌃V in a window on another Mac: this Mac's clipboard image, for Claude.
+    terminal.attachCustomKeyEventHandler((event) => {
+      if (event.type !== "keydown" || !isRemote() || !isPasteImageKey(event)) return true;
+      event.preventDefault();
+      void pasteClipboardImage(tabId);
+      return false;
+    });
     terminal.loadAddon(new Unicode11Addon());
     terminal.unicode.activeVersion = "11";
     // window.open is routed to the real browser by the app.
@@ -246,6 +253,27 @@ export function sendToTerminal(tabId: string, text: string) {
 
   view.terminal.paste(text);
   setTimeout(() => daemon.send({ type: "input", tabId, data: "\r" }), 100);
+}
+
+/** ⌃V: Claude Code's own paste, of an image on the clipboard. */
+export const isPasteImageKey = (event: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean }) =>
+  event.key === "v" && event.ctrlKey && !event.metaKey && !event.altKey;
+
+/**
+ * Pastes the clipboard's image into Claude Code's prompt in the tab. On this
+ * Mac that's ⌃V, which Claude answers by reading the clipboard itself. On
+ * another Mac's window it would read the wrong one, so the image goes over
+ * and its path is typed, which Claude takes the way it takes a dropped image.
+ * Resolves with whether there was an image.
+ */
+export async function pasteClipboardImage(tabId: string): Promise<boolean> {
+  const bridge = window.miks;
+  const result = (await bridge?.sendClipboardImage(tabId)) ?? { image: false };
+  const view = views.get(tabId);
+  if (result.path && view) view.terminal.paste(shellEscape(result.path) + " ");
+  // Nothing went over (no image, or no tunnel): ⌃V as it is.
+  else daemon.send({ type: "input", tabId, data: "\x16" });
+  return result.image;
 }
 
 /** Interrupts what the tab's program is doing, as Escape would. */

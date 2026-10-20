@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld("miks", {
   pathForFile: (file) => webUtils.getPathForFile(file),
   /** Copies dropped files to a temporary folder (on a remote window's Mac) or the tab's; resolves with where. */
   sendFiles: (tabId, paths, into) => ipcRenderer.invoke("miks:sendFiles", tabId, paths, into),
+  sendClipboardImage: (tabId) => ipcRenderer.invoke("miks:sendClipboardImage", tabId),
 });
 
 function subscribe(channel, listener) {

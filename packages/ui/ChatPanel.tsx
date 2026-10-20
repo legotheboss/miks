@@ -25,7 +25,15 @@ import { styled } from "styled-components";
 import { daemon } from "./daemon";
 import { renderMarkdown } from "./markdown";
 import { useSettings } from "./settings";
-import { droppedText, focusActiveTerminal, onDragOver, sendEscape, sendToTerminal } from "./TerminalView";
+import {
+  droppedText,
+  focusActiveTerminal,
+  isPasteImageKey,
+  onDragOver,
+  pasteClipboardImage,
+  sendEscape,
+  sendToTerminal,
+} from "./TerminalView";
 
 /**
  * What the panel keeps about a tab goes by its key, which a daemon restart
@@ -405,13 +413,15 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
     atBottom.current = true;
   }
 
-  // ⌃V is Claude Code's own paste, of an image on the clipboard: it reads
-  // the clipboard itself, so the keystroke goes to the terminal, and the
-  // image to Claude's prompt, ahead of what you send from here. (It's this
-  // Mac's clipboard Claude reads, so not for a window on another Mac.)
-  function pasteImage() {
-    daemon.send({ type: "input", tabId: tab.id, data: "\x16" });
-    showToast({ title: "Pasted into Claude's prompt", message: "An image on the clipboard goes in with your message." });
+  // ⌃V (or ⌘V with only an image) puts the clipboard's image in Claude's
+  // prompt, in the terminal, ahead of what you send from here.
+  async function pasteImage() {
+    const image = await pasteClipboardImage(tab.id);
+    showToast(
+      image
+        ? { title: "Image pasted into Claude's prompt", message: "It goes in with your next message." }
+        : { title: "No image on the clipboard" },
+    );
   }
 
   // Return is always a newline; ⌘Return sends.
@@ -419,9 +429,9 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
     if (event.key === "Enter" && event.metaKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       send();
-    } else if (event.key === "v" && event.ctrlKey && !event.metaKey && !event.altKey) {
+    } else if (isPasteImageKey(event)) {
       event.preventDefault();
-      pasteImage();
+      void pasteImage();
     } else if (event.key === "Escape") {
       event.preventDefault();
       leave();
@@ -528,9 +538,9 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
           if (event.key === "/" && plain) {
             event.preventDefault();
             focusComposer();
-          } else if (event.key === "v" && event.ctrlKey && !event.metaKey && !event.altKey) {
+          } else if (isPasteImageKey(event)) {
             event.preventDefault();
-            pasteImage();
+            void pasteImage();
           } else if ((event.key === "ArrowUp" || event.key === "ArrowDown") && plain) {
             event.preventDefault();
             jump(event.key === "ArrowUp" ? -1 : 1);
@@ -597,6 +607,13 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
           value={text}
           onValueChange={changeText}
           onKeyDown={onKeyDown}
+          onPaste={(event) => {
+            // An image and no text: what Claude takes is the image.
+            const { clipboardData } = event;
+            if (clipboardData.getData("text/plain") || ![...clipboardData.items].some((item) => item.type.startsWith("image/"))) return;
+            event.preventDefault();
+            void pasteImage();
+          }}
           placeholder={placeholder()}
           disabled={!session}
           autoSizing
