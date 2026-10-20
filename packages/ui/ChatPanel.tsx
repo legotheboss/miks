@@ -6,10 +6,12 @@ import { ModalContext } from "crosswing/modals/context";
 import { tooltip } from "crosswing/modals/popup";
 import { ArrowUp, ChevronRight, Square, TextQuote } from "lucide-react";
 import type { ChatEntry, Tab } from "miks/shared/protocol";
+import { DEFAULT_SETTINGS } from "miks/shared/settings";
 import {
   type DragEvent,
   type KeyboardEvent,
   type MouseEvent,
+  type CSSProperties,
   type ReactNode,
   use,
   useEffect,
@@ -21,6 +23,7 @@ import {
 import { styled } from "styled-components";
 import { daemon } from "./daemon";
 import { renderMarkdown } from "./markdown";
+import { useSettings } from "./settings";
 import { droppedText, focusActiveTerminal, onDragOver, sendEscape, sendToTerminal } from "./TerminalView";
 
 /**
@@ -169,8 +172,12 @@ const StyledChatLayout = styled.div`
  * truth: this is another view of it.
  */
 export function ChatPanel({ tab, visible, supported }: { tab: Tab; visible: boolean; supported: boolean }) {
+  const { fontSize } = useSettings();
+
   return (
-    <StyledChatPanel>
+    // Its text grows and shrinks with the terminal's (⌘= and ⌘-), through
+    // the font scale crosswing's fonts all follow.
+    <StyledChatPanel style={{ "--font-scale": fontSize / DEFAULT_SETTINGS.fontSize } as CSSProperties}>
       {supported ? (
         <Conversation tab={tab} visible={visible} />
       ) : (
