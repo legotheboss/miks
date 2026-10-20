@@ -67,3 +67,36 @@ test("pasted messages, and ones sent while Claude was working, are prompts too",
   const fromAgent = { ...queued, origin: { kind: "task-notification" } };
   expect(parseTranscriptLine(line({ type: "attachment", attachment: fromAgent }))).toEqual([]);
 });
+
+test("a rewound conversation shows the path it took, and a compaction carries on from before it", async () => {
+  const fs = await import("fs");
+  const os = await import("os");
+  const path = await import("path");
+  const { Transcript } = await import("./Transcript.ts");
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "miks transcript-")), "t.jsonl");
+  const say = (uuid: string, parentUuid: string | null, type: "user" | "assistant", text: string, extra = {}) =>
+    JSON.stringify({ parentUuid, ...extra, type, uuid, timestamp: "2026-10-20T12:00:00.000Z", message: { role: type, content: type === "user" ? text : [{ type: "text", text }] } });
+  fs.writeFileSync(
+    file,
+    [
+      say("a", null, "user", "One"),
+      say("b", "a", "assistant", "Two"),
+      // Compacted: no parent (its logical one isn't a line), right after "Two".
+      JSON.stringify({ parentUuid: null, logicalParentUuid: "elsewhere", type: "system", subtype: "compact_boundary", uuid: "c" }),
+      say("d", "c", "user", "Three"),
+      say("e", "d", "assistant", "Four"),
+      say("f", "e", "user", "Rewound past"),
+      say("g", "f", "assistant", "Gone"),
+      // Rewound to after "Four".
+      say("h", "e", "user", "Instead"),
+      // Bookkeeping lines don't count.
+      JSON.stringify({ type: "last-prompt", lastPrompt: "Instead", leafUuid: "h" }),
+      "",
+    ].join("\n"),
+  );
+
+  const transcript = new Transcript(file);
+  await transcript.ready;
+  transcript.close();
+  expect(transcript.entries.map((entry) => ("text" in entry ? entry.text : ""))).toEqual(["One", "Two", "Three", "Four", "Instead"]);
+});

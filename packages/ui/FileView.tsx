@@ -1,6 +1,6 @@
 import { LanguageDescription } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
-import { Compartment, EditorState } from "@codemirror/state";
+import { Compartment, EditorState, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { colors } from "crosswing/colors";
@@ -25,7 +25,18 @@ import { getSettings } from "./settings";
  * another Mac too. It follows the file on disk; a change there while you
  * have unsaved ones of your own asks which to keep.
  */
-export function FileView({ tab, file, focusOnOpen }: { tab: Tab; file: OpenFile; focusOnOpen: boolean }) {
+export function FileView({
+  tab,
+  file,
+  focusOnOpen,
+  onHide,
+}: {
+  tab: Tab;
+  file: OpenFile;
+  focusOnOpen: boolean;
+  /** Escape: hides the panel, the file still open in it as it was. */
+  onHide: () => void;
+}) {
   const { showToast } = use(ModalContext);
   const dark = useMatchMedia("(prefers-color-scheme: dark)");
   const editorRef = useRef<HTMLDivElement>(null);
@@ -100,6 +111,19 @@ export function FileView({ tab, file, focusOnOpen }: { tab: Tab; file: OpenFile;
               },
             },
           ]),
+          // Escape hides the panel, once CodeMirror has nothing of its own
+          // to close with it (search, completions).
+          Prec.lowest(
+            keymap.of([
+              {
+                key: "Escape",
+                run: () => {
+                  onHide();
+                  return true;
+                },
+              },
+            ]),
+          ),
           compartments.theme.of(dark ? codemirrorDark : codemirrorLight),
           compartments.language.of([]),
           compartments.editable.of(editableExtension(editing)),

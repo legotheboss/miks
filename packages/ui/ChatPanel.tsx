@@ -25,6 +25,7 @@ import { styled } from "styled-components";
 import { daemon } from "./daemon";
 import { FileView } from "./FileView";
 import { renderMarkdown } from "./markdown";
+import { showPill } from "./Pill";
 import { useSettings } from "./settings";
 import {
   droppedText,
@@ -143,16 +144,34 @@ export function ChatLayout({
   supported: boolean;
   children: ReactNode;
 }) {
-  const chatShown = useChatOpen(tab) && !!tab.agent;
+  // Open or not is the panel's, apart from what's in it: hiding it (⌘⇧C,
+  // Escape) leaves an open file as it was, unsaved changes and all.
+  const panelOpen = useChatOpen(tab);
   const file = tab.file;
-  // A file opening (or opened again) comes to the front; Chat | file switches.
+  const visible = panelOpen && (!!tab.agent || !!file);
+  // Chat | file, in a Claude tab with a file open.
   const [view, setView] = useState<"chat" | "file">("file");
-  useEffect(() => {
-    if (file) setView("file");
-  }, [file?.id]);
-  const showing = file && (view === "file" || !chatShown) ? "file" : "chat";
-  const visible = chatShown || !!file;
+  const showing = file && (view === "file" || !tab.agent) ? "file" : "chat";
   const ref = useRef<HTMLDivElement>(null);
+
+  // A file opening (or opened again) comes to the front, opening the panel
+  // if it was closed; and a panel opened for a file closes with it.
+  const fileId = useRef(file?.id);
+  const openedForFile = useRef(false);
+  useEffect(() => {
+    if (fileId.current === file?.id) return;
+    fileId.current = file?.id;
+    if (file) {
+      setView("file");
+      if (!isChatOpen(tab)) {
+        openedForFile.current = true;
+        setChatOpen(tab, true);
+      }
+    } else if (openedForFile.current) {
+      openedForFile.current = false;
+      setChatOpen(tab, false);
+    }
+  }, [file?.id]);
 
   // Coming back to the tab, the keyboard goes back where it was: into the
   // panel, if it was there. And always into the panel when it covers the
@@ -163,6 +182,13 @@ export function ChatLayout({
   useLayoutEffect(() => {
     returnTo.current = active ? panelFocus.get(tab.id) : undefined;
   }, [active]);
+
+  // Opened yourself (⌘⇧C) with the file showing: the keyboard goes to it.
+  useEffect(() => {
+    if (!visible || !focusOnShow || showing !== "file" || !ref.current) return;
+    focusOnShow = false;
+    focusPanel(ref.current, "file");
+  }, [visible]);
 
   useEffect(() => {
     const root = ref.current;
@@ -193,8 +219,7 @@ export function ChatLayout({
         edge="right"
         mode="auto"
         panelVisible={visible}
-        // A click on the shaded terminal (overlay mode): the chat goes, but
-        // a file stays until it's closed, being something you may not have saved.
+        // A click on the shaded terminal (overlay mode) hides it.
         onPanelVisibleChange={(open) => {
           setChatOpen(tab, open);
           if (!open) focusActiveTerminal();
@@ -214,9 +239,10 @@ export function ChatLayout({
           visible={visible}
           supported={supported}
           showing={showing}
-          onShow={(next) => {
-            if (next === "chat") setChatOpen(tab, true);
-            setView(next);
+          onShow={setView}
+          onHide={() => {
+            setChatOpen(tab, false);
+            focusActiveTerminal();
           }}
           focusFile={active}
         />
@@ -318,6 +344,7 @@ export function ChatPanel({
   supported,
   showing,
   onShow,
+  onHide,
   focusFile,
 }: {
   tab: Tab;
@@ -326,6 +353,8 @@ export function ChatPanel({
   /** The conversation or the tab's file; both stay put while the other shows. */
   showing: "chat" | "file";
   onShow: (showing: "chat" | "file") => void;
+  /** Hides the panel (Escape in the file), leaving what's in it as it is. */
+  onHide: () => void;
   /** Whether the file's editor takes the keyboard as it opens (`miks edit`). */
   focusFile: boolean;
 }) {
@@ -352,7 +381,7 @@ export function ChatPanel({
       )}
       {tab.file && (
         <div className="file-view">
-          <FileView key={tab.file.id} tab={tab} file={tab.file} focusOnOpen={focusFile && tab.file.edit} />
+          <FileView key={tab.file.id} tab={tab} file={tab.file} focusOnOpen={focusFile && tab.file.edit} onHide={onHide} />
         </div>
       )}
     </StyledChatPanel>
@@ -435,7 +464,8 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
 
   // Once there's a session: until then the field is disabled, and won't take it.
   useEffect(() => {
-    if (!visible || !chat?.session || !focusOnShow) return;
+    // Not with the file showing instead (ChatLayout gives it the editor).
+    if (!visible || !chat?.session || !focusOnShow || !composerRef.current?.offsetParent) return;
     focusOnShow = false;
     focusComposer();
   }, [visible, chat?.session]);
@@ -491,11 +521,7 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
   // prompt, in the terminal, ahead of what you send from here.
   async function pasteImage() {
     const image = await pasteClipboardImage(tab.id);
-    showToast(
-      image
-        ? { title: "Image pasted into Claude's prompt", message: "It goes in with your next message." }
-        : { title: "No image on the clipboard" },
-    );
+    showPill(image ? "Image pasted into Claude's prompt" : "No image on the clipboard");
   }
 
   // Return is always a newline; ⌘Return sends.
@@ -943,8 +969,11 @@ const StyledChatPanel = styled.div`
         font: ${fonts.displayBold({ size: 15, line: "21px" })};
       }
 
+      /* Quieter than the prose, like the tool lines. */
       a {
-        color: inherit;
+        color: ${colors.textSecondary()};
+        text-decoration-color: ${colors.textSecondary({ alpha: 0.4 })};
+        text-underline-offset: 2px;
       }
 
       blockquote {

@@ -47,13 +47,13 @@ export function TabBar({ workspace, ...rest }: HTMLAttributes<HTMLDivElement> & 
         <Plus />
       </button>
       <div className="spacer" />
-      {/* The tab's conversation, so only while Claude Code runs in it. */}
-      {activeTab?.agent && (
+      {/* The tab's panel: its conversation, while Claude Code runs in it, or a file. */}
+      {(activeTab?.agent || activeTab?.file) && (
         <button
           className="chat-toggle"
           data-on={chatOpen}
           onClick={() => toggleChat(activeTab)}
-          {...tooltip(chatOpen ? "Hide chat" : "Show chat", { hotkey: "cmd+shift+c", delay: true })}
+          {...tooltip(chatOpen ? "Hide panel" : "Show panel", { hotkey: "cmd+shift+c", delay: true })}
         >
           <PanelRight />
         </button>

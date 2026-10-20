@@ -564,7 +564,7 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
       chat.ready = true;
       tell(transcript?.entries ?? [], true);
       transcript?.on("entries", (entries) => tell(entries, false));
-      transcript?.on("reset", () => tell([], true));
+      transcript?.on("reset", (entries) => tell(entries, true));
     };
     if (transcript) void transcript.ready.then(start);
     else start();

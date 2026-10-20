@@ -9,6 +9,7 @@ import { DEFAULT_SETTINGS } from "miks/shared/settings";
 import { useEffect, useRef } from "react";
 import { styled } from "styled-components";
 import { ChatLayout, isChatOpen, setChatOpen, toggleChat } from "./ChatPanel";
+import { PillHost } from "./Pill";
 import { closeTab, closeWorkspace } from "./closing";
 import { daemon, type Target, useDaemon, useTarget } from "./daemon";
 import { getSettings, setFontSize, updateSettings, useSettings } from "./settings";
@@ -124,6 +125,7 @@ export function App() {
         </div>
         <Sidebar workspaces={state.workspaces} activeWorkspaceId={state.activeWorkspaceId} home={state.home} />
       </PanelLayout>
+      <PillHost />
     </StyledApp>
   );
 }
@@ -293,9 +295,9 @@ function runCommand(command: string) {
 
   switch (command) {
     case "toggleChat": {
-      // Only for a tab running Claude Code.
+      // Only for a tab with something to show: Claude Code, or a file.
       const tab = tabs[tabIndex];
-      if (tab?.agent) toggleChat(tab);
+      if (tab?.agent || tab?.file) toggleChat(tab);
       return;
     }
     case "newTab":

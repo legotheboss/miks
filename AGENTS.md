@@ -239,9 +239,16 @@ resizes); keep it passing.
   format isn't a documented API, so the parser takes prompts, text and
   `tool_use` and skips everything else. Pasted text comes wrapped in
   `<pasted_content …>` tags, and a message sent while Claude works is an
-  `attachment` line (`queued_command`), not a user message. Files run past 100MB (tool output),
-  so a cheap substring check comes before `JSON.parse`. A 130MB one reads
-  in about 300ms, in chunks, without holding up the event loop. `fs.watchFile`,
+  `attachment` line (`queued_command`), not a user message. The
+  transcript is a tree (each line's `parentUuid`): a rewind carries on
+  from an earlier line, leaving the rest in the file, so the panel shows
+  the path back from the latest line, and a `reset` when it stops
+  continuing the one shown. A compaction (`compact_boundary`) has no
+  parent (its `logicalParentUuid` is in no line), so the path crosses it to
+  the line written before it. Files run past 100MB (tool output);
+  only the tree's lines (they start with `{"parentUuid"`) are parsed, and
+  a 130MB one reads in about 300ms, in chunks, without holding up the
+  event loop. `fs.watchFile`,
   not `fs.watch`, because a session has its path before the file exists.
   Sending pastes the message (bracketed, so newlines stay in it) and sends
   Return 100ms later. The Stop hook's `last_assistant_message` gives
@@ -272,7 +279,9 @@ resizes); keep it passing.
   replace files) and saves it, so a remote window edits that Mac's file. A
   save is refused if the file's mtime moved since the editor's copy, unless
   forced (`saveFile`); the editor then asks. In a Claude tab the panel
-  switches Chat | file, both kept mounted (CSS hides one).
+  switches Chat | file, both kept mounted (CSS hides one). The panel's
+  open or not apart from the file (⌘⇧C, Escape in the editor once
+  CodeMirror has nothing to close): hidden, the file stays as it was.
 
 - Settings (`miks/shared/settings`) live in `settings.json`, owned by the
   Electron main process and pushed to every window; not localStorage, which

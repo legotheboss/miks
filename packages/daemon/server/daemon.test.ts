@@ -785,10 +785,17 @@ test("the chat panel gets a tab's conversation, then each new message, through i
   const tabId = activeTab(daemon.workspaces.getState());
   const first = path.join(home, "first.jsonl");
   const second = path.join(home, "second.jsonl");
-  const message = (uuid: string, type: "user" | "assistant", text: string) =>
-    JSON.stringify({ type, uuid, timestamp: new Date().toISOString(), message: { role: type, content: type === "user" ? text : [{ type: "text", text }] } }) + "\n";
+  // As Claude Code writes them: what each follows, first.
+  const message = (uuid: string, type: "user" | "assistant", text: string, parentUuid: string | null) =>
+    JSON.stringify({
+      parentUuid,
+      type,
+      uuid,
+      timestamp: new Date().toISOString(),
+      message: { role: type, content: type === "user" ? text : [{ type: "text", text }] },
+    }) + "\n";
 
-  fs.writeFileSync(first, message("a", "user", "Hello") + message("b", "assistant", "Hi **there**"));
+  fs.writeFileSync(first, message("a", "user", "Hello", null) + message("b", "assistant", "Hi **there**", "a"));
   await postHook(tabId, { hook_event_name: "SessionStart", session_id: "first", transcript_path: first });
 
   const client = await connect();
@@ -814,14 +821,20 @@ test("the chat panel gets a tab's conversation, then each new message, through i
   expect(chats[0].entries).toHaveLength(2);
 
   // Appended in two writes, the second finishing the line.
-  const more = message("c", "user", "And then?");
+  const more = message("c", "user", "And then?", "b");
   fs.appendFileSync(first, more.slice(0, 20));
   await new Promise((resolve) => setTimeout(resolve, 400));
   fs.appendFileSync(first, more.slice(20));
   await watch(() => texts().join("|") === "Hello|Hi **there**|And then?");
 
+  // A rewind (Esc Esc) to before "And then?": what's after it stays in the
+  // file, but the conversation goes on from "Hi there" without it.
+  fs.appendFileSync(first, message("e", "user", "Something else", "b"));
+  await watch(() => texts().join("|") === "Hello|Hi **there**|Something else");
+  expect(chats.at(-1)).toMatchObject({ reset: true });
+
   // A new session (/clear) starts the conversation over.
-  fs.writeFileSync(second, message("d", "user", "Fresh start"));
+  fs.writeFileSync(second, message("d", "user", "Fresh start", null));
   await postHook(tabId, { hook_event_name: "SessionStart", session_id: "second", transcript_path: second });
   await watch(() => texts().at(-1) === "Fresh start");
   const reset = chats.findLast((chat) => chat.reset)!;

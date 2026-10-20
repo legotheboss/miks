@@ -81,6 +81,7 @@ export function TerminalView({
       // Once it's parsed, where the cursor is: the snapshot carries no marks.
       if (event.type === "snapshot") terminal.write(event.data, () => commands.attached());
       else terminal.write(event.data);
+      if (event.type === "output") for (const watcher of outputWatchers.get(tabId) ?? []) watcher(event.data);
     });
 
     // Only the tab on screen decides its pane's size, and only once its
@@ -255,6 +256,43 @@ export function sendToTerminal(tabId: string, text: string) {
   setTimeout(() => daemon.send({ type: "input", tabId, data: "\r" }), 100);
 }
 
+/** What's waiting to see some text come out of each tab's program. */
+const outputWatchers = new Map<string, Set<(data: string) => void>>();
+
+/** The highest `[Image #N]` on the tab's screen: Claude Code's pasted images. */
+function lastImageNumber(terminal: Terminal): number {
+  const buffer = terminal.buffer.active;
+  let highest = 0;
+  for (let i = 0; i < buffer.length; i++) {
+    for (const match of buffer.getLine(i)?.translateToString(true).matchAll(/\[Image #(\d+)\]/g) ?? []) {
+      highest = Math.max(highest, Number(match[1]));
+    }
+  }
+  return highest;
+}
+
+/** Resolves true once the tab's program prints a new `[Image #N]`, false if it doesn't in time. */
+function waitForNewImage(tabId: string, after: number, timeout: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    let seen = "";
+    const watchers = outputWatchers.get(tabId) ?? new Set();
+    outputWatchers.set(tabId, watchers);
+    const finish = (found: boolean) => {
+      clearTimeout(timer);
+      watchers.delete(watch);
+      resolve(found);
+    };
+    const watch = (data: string) => {
+      // The text alone (Claude Code colors its tags), and a little of what
+      // came before, for a tag split across writes.
+      seen = (seen + data.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")).slice(-200);
+      for (const match of seen.matchAll(/\[Image #(\d+)\]/g)) if (Number(match[1]) > after) return finish(true);
+    };
+    const timer = setTimeout(() => finish(false), timeout);
+    watchers.add(watch);
+  });
+}
+
 /** ⌃V: Claude Code's own paste, of an image on the clipboard. */
 export const isPasteImageKey = (event: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean }) =>
   event.key === "v" && event.ctrlKey && !event.metaKey && !event.altKey;
@@ -270,9 +308,18 @@ export async function pasteClipboardImage(tabId: string): Promise<boolean> {
   const bridge = window.miks;
   const result = (await bridge?.sendClipboardImage(tabId)) ?? { image: false };
   const view = views.get(tabId);
-  if (result.path && view) view.terminal.paste(shellEscape(result.path) + " ");
-  // Nothing went over (no image, or no tunnel): ⌃V as it is.
-  else daemon.send({ type: "input", tabId, data: "\x16" });
+  if (result.path && view) {
+    view.terminal.paste(shellEscape(result.path) + " ");
+    return true;
+  }
+
+  // Nothing went over (no image, or no tunnel): ⌃V as it is. And once
+  // Claude has put the image's tag in, a space after it, for what comes next.
+  const before = view ? lastImageNumber(view.terminal) : 0;
+  daemon.send({ type: "input", tabId, data: "\x16" });
+  if (result.image) {
+    void waitForNewImage(tabId, before, 3000).then((found) => found && daemon.send({ type: "input", tabId, data: " " }));
+  }
   return result.image;
 }
 

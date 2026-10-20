@@ -12,15 +12,29 @@ const MAX_ENTRIES = 2000;
 /** How often the transcript is checked for more. A stat; it's cheap. */
 const POLL_INTERVAL = 250;
 
+/** A line of the conversation's tree: what it follows, and what it says, if anything the panel shows. */
+type Node = { parent: string | null; boundary: boolean; entries: ChatEntry[] };
+
 /**
  * A Claude Code session's conversation, read from its transcript (JSONL, a
  * line per message, appended as each one is done) and followed as it grows.
- * Emits `entries` with each batch of new ones, and `reset` when the file
- * starts over.
+ *
+ * A transcript is a tree, not a list: each line names the one it follows
+ * (`parentUuid`), and rewinding (Esc Esc) carries on from an earlier one,
+ * the lines past it staying in the file. So what's shown is the path back
+ * from the latest line. Emits `entries` with what continues the path, and
+ * `reset` with all of it when the path changed (a rewind, or the file
+ * starting over).
  */
-export class Transcript extends EventEmitter<{ entries: [entries: ChatEntry[]]; reset: [] }> {
+export class Transcript extends EventEmitter<{ entries: [entries: ChatEntry[]]; reset: [entries: ChatEntry[]] }> {
   readonly file: string;
   entries: ChatEntry[] = [];
+  private readonly nodes = new Map<string, Node>();
+  /** Lines in the order written, for crossing a compaction (see `path`). */
+  private readonly order: string[] = [];
+  private readonly orderIndex = new Map<string, number>();
+  /** The conversation's latest line, the end of the path shown. */
+  private leaf: string | null = null;
   private offset = 0;
   /** A line still being written, at the end of what's been read. */
   private partial = "";
@@ -74,14 +88,17 @@ export class Transcript extends EventEmitter<{ entries: [entries: ChatEntry[]]; 
 
     if (size < this.offset) {
       this.entries = [];
+      this.nodes.clear();
+      this.order.length = 0;
+      this.orderIndex.clear();
+      this.leaf = null;
       this.offset = 0;
       this.partial = "";
-      this.emit("reset");
+      this.emit("reset", []);
     }
     if (size === this.offset) return;
 
     // In chunks, so a long transcript never holds up the terminals.
-    const fresh: ChatEntry[] = [];
     const stream = fs.createReadStream(this.file, {
       start: this.offset,
       end: size - 1,
@@ -92,16 +109,86 @@ export class Transcript extends EventEmitter<{ entries: [entries: ChatEntry[]]; 
       if (this.closed) return stream.destroy();
       const lines = (this.partial + chunk).split("\n");
       this.partial = lines.pop()!;
-      for (const line of lines) fresh.push(...parseTranscriptLine(line));
-      if (fresh.length > 2 * MAX_ENTRIES) fresh.splice(0, fresh.length - MAX_ENTRIES);
+      for (const line of lines) this.addLine(line);
     }
     this.offset = size;
+    if (this.closed) return;
 
-    if (fresh.length === 0 || this.closed) return;
-    const added = fresh.slice(-MAX_ENTRIES);
-    this.entries = [...this.entries, ...added].slice(-MAX_ENTRIES);
-    this.emit("entries", added);
+    const path = this.path();
+    const added = continuation(this.entries, path);
+    this.entries = path;
+    if (added === null) this.emit("reset", path);
+    else if (added.length > 0) this.emit("entries", added);
   }
+
+  /** Every line of the conversation's tree starts with its parent; the rest is bookkeeping. */
+  private addLine(line: string) {
+    if (!line.startsWith('{"parentUuid"')) return;
+
+    let record: any;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      return;
+    }
+    // Subagents' conversations hang off the main one; they're theirs.
+    if (typeof record?.uuid !== "string" || record.isSidechain) return;
+
+    const uuid: string = record.uuid;
+    this.nodes.set(uuid, {
+      parent: typeof record.parentUuid === "string" ? record.parentUuid : null,
+      boundary: record.subtype === "compact_boundary",
+      entries: parseRecord(record),
+    });
+    if (!this.orderIndex.has(uuid)) {
+      this.orderIndex.set(uuid, this.order.length);
+      this.order.push(uuid);
+    }
+    this.leaf = uuid;
+  }
+
+  /**
+   * The conversation as it stands: back from the latest line to the start,
+   * up to the most there's room for. A compaction starts over with no parent
+   * (the one it names isn't in the file), but it's written right after what
+   * it compacted, so the line before it carries on.
+   */
+  private path(): ChatEntry[] {
+    const chunks: ChatEntry[][] = [];
+    let count = 0;
+    let id = this.leaf;
+    const seen = new Set<string>();
+    while (id && !seen.has(id) && count < MAX_ENTRIES) {
+      seen.add(id);
+      const node = this.nodes.get(id);
+      if (!node) break;
+      if (node.entries.length > 0) {
+        chunks.push(node.entries);
+        count += node.entries.length;
+      }
+      if (node.parent) id = node.parent;
+      else if (node.boundary) id = this.order[(this.orderIndex.get(id) ?? 0) - 1] ?? null;
+      else id = null;
+    }
+    return chunks.reverse().flat().slice(-MAX_ENTRIES);
+  }
+}
+
+/**
+ * What `next` adds to `previous`, if it carries on from it: it holds
+ * `previous`'s last entry, with what came before matching. Null if it
+ * doesn't (a rewind), for sending all of it again.
+ */
+function continuation(previous: ChatEntry[], next: ChatEntry[]): ChatEntry[] | null {
+  if (previous.length === 0) return next;
+  const last = previous[previous.length - 1];
+  const at = next.findLastIndex((entry) => entry.id === last.id);
+  if (at < 0) return null;
+  // Back as far as both go (the oldest may have dropped off either).
+  for (let i = 1; i <= Math.min(at, previous.length - 1); i++) {
+    if (next[at - i].id !== previous[previous.length - 1 - i].id) return null;
+  }
+  return next.slice(at + 1);
 }
 
 /**
@@ -111,17 +198,16 @@ export class Transcript extends EventEmitter<{ entries: [entries: ChatEntry[]]; 
  * messages Claude Code adds itself.
  */
 export function parseTranscriptLine(line: string): ChatEntry[] {
-  // Most lines are none of these, and some are huge: no need to parse those.
-  const queued = line.includes('"queued_command"');
-  if (!queued && !line.includes('"type":"user"') && !line.includes('"type":"assistant"')) return [];
-
-  let record: any;
   try {
-    record = JSON.parse(line);
+    return parseRecord(JSON.parse(line));
   } catch {
     return [];
   }
-  if (record?.isSidechain || record?.isMeta || record?.isCompactSummary) return [];
+}
+
+/** What one parsed transcript line says, for the panel (see parseTranscriptLine). */
+function parseRecord(record: any): ChatEntry[] {
+  if (!record || record.isSidechain || record.isMeta || record.isCompactSummary) return [];
   if (typeof record.uuid !== "string") return [];
 
   const id: string = record.uuid;
@@ -131,7 +217,7 @@ export function parseTranscriptLine(line: string): ChatEntry[] {
   // A message you sent while Claude was working, which it took in mid-turn.
   if (record.type === "attachment") {
     const attachment = record.attachment;
-    if (!queued || attachment?.type !== "queued_command" || attachment.commandMode !== "prompt") return [];
+    if (attachment?.type !== "queued_command" || attachment.commandMode !== "prompt") return [];
     if (attachment.origin?.kind !== "human" || typeof attachment.prompt !== "string") return [];
     const prompt = promptText(attachment.prompt);
     return prompt ? [{ id, kind: "prompt", text: prompt, time }] : [];
