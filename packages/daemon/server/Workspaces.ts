@@ -566,6 +566,8 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
   private getTab(id: string): Tab {
     return {
       id,
+      // Its history file's name, which a restore gives back to it.
+      key: this.historyIds.get(id),
       title: this.panes.get(id)?.displayTitle ?? "",
       cwd: this.cwds.get(id) ?? null,
       agent: this.agents.get(id) ?? null,

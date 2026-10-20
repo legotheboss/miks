@@ -28,22 +28,29 @@ import { useSettings } from "./settings";
 import { droppedText, focusActiveTerminal, onDragOver, sendEscape, sendToTerminal } from "./TerminalView";
 
 /**
+ * What the panel keeps about a tab goes by its key, which a daemon restart
+ * gives back to the restored tab; its id is a new pane's. A daemon from
+ * before protocol 6 sends no key.
+ */
+const keyOf = (tab: Pick<Tab, "id" | "key">) => tab.key ?? tab.id;
+
+/**
  * What you've started writing in each tab, kept while you look at others and
- * across relaunches. In this window's storage: a draft is this Mac's, and
- * lost if it can't be kept, nothing worse. A restored tab is a new one.
+ * across relaunches and daemon restarts. In this window's storage: a draft is
+ * this Mac's, and lost if it can't be kept, nothing worse.
  */
 const drafts = {
-  get(tabId: string): string {
+  get(tab: Tab): string {
     try {
-      return localStorage.getItem(`ChatPanel:draft:${tabId}`) ?? "";
+      return localStorage.getItem(`ChatPanel:draft:${keyOf(tab)}`) ?? "";
     } catch {
       return "";
     }
   },
-  set(tabId: string, text: string) {
+  set(tab: Tab, text: string) {
     try {
-      if (text) localStorage.setItem(`ChatPanel:draft:${tabId}`, text);
-      else localStorage.removeItem(`ChatPanel:draft:${tabId}`);
+      if (text) localStorage.setItem(`ChatPanel:draft:${keyOf(tab)}`, text);
+      else localStorage.removeItem(`ChatPanel:draft:${keyOf(tab)}`);
     } catch {}
   },
 };
@@ -67,27 +74,29 @@ function readOpenTabs(): string[] {
   }
 }
 
-export function isChatOpen(tabId: string): boolean {
-  return openTabs.has(tabId);
+export function isChatOpen(tab: Tab): boolean {
+  return openTabs.has(keyOf(tab));
 }
 
-export function setChatOpen(tabId: string, open: boolean) {
-  if (open === openTabs.has(tabId)) return;
-  if (open) openTabs.add(tabId);
-  else openTabs.delete(tabId);
+export function setChatOpen(tab: Tab, open: boolean) {
+  const key = keyOf(tab);
+  if (open === openTabs.has(key)) return;
+  if (open) openTabs.add(key);
+  else openTabs.delete(key);
   try {
     localStorage.setItem("ChatPanel:open", JSON.stringify([...openTabs]));
   } catch {}
   for (const listener of openListeners) listener();
 }
 
-export function useChatOpen(tabId: string | null): boolean {
+export function useChatOpen(tab: Tab | null): boolean {
+  const key = tab ? keyOf(tab) : null;
   return useSyncExternalStore(
     (listener) => {
       openListeners.add(listener);
       return () => openListeners.delete(listener);
     },
-    () => !!tabId && openTabs.has(tabId),
+    () => !!key && openTabs.has(key),
   );
 }
 
@@ -95,11 +104,11 @@ export function useChatOpen(tabId: string | null): boolean {
 let focusOnShow = false;
 
 /** Opens or closes a tab's panel (⌘⇧C, or the tab bar's button), moving the keyboard with it. */
-export function toggleChat(tabId: string) {
-  const open = !openTabs.has(tabId);
+export function toggleChat(tab: Tab) {
+  const open = !isChatOpen(tab);
   if (open) focusOnShow = true;
   else focusActiveTerminal();
-  setChatOpen(tabId, open);
+  setChatOpen(tab, open);
 }
 
 /**
@@ -117,7 +126,7 @@ export function ChatLayout({
   supported: boolean;
   children: ReactNode;
 }) {
-  const visible = useChatOpen(tab.id) && !!tab.agent;
+  const visible = useChatOpen(tab) && !!tab.agent;
   const ref = useRef<HTMLDivElement>(null);
 
   // Coming back to the tab, the keyboard goes back where it was: into the
@@ -154,7 +163,7 @@ export function ChatLayout({
         mode="auto"
         panelVisible={visible}
         onPanelVisibleChange={(open) => {
-          setChatOpen(tab.id, open);
+          setChatOpen(tab, open);
           if (!open) focusActiveTerminal();
         }}
         panelDefaultSize={420}
@@ -305,7 +314,7 @@ const MAX_ENTRIES = 2000;
 
 function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
   const [chat, setChat] = useState<{ session: string | null; entries: ChatEntry[] } | null>(null);
-  const [text, setText] = useState(drafts.get(tab.id));
+  const [text, setText] = useState(drafts.get(tab));
   // Sent from here and not yet in the transcript: shown right away, faded.
   const [pending, setPending] = useState<{ id: string; text: string; time: number }[]>([]);
   const [quote, setQuote] = useState<{ text: string; top: number; left: number } | null>(null);
@@ -351,7 +360,7 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
   // by closing the panel.
   const { panelMode } = use(PanelLayoutContext);
   function leave() {
-    if (panelMode === "overlay") setChatOpen(tab.id, false);
+    if (panelMode === "overlay") setChatOpen(tab, false);
     else focusActiveTerminal();
   }
 
@@ -365,7 +374,7 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
 
   function changeText(next: string) {
     setText(next);
-    drafts.set(tab.id, next);
+    drafts.set(tab, next);
   }
 
   function insert(addition: string) {

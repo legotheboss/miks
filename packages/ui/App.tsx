@@ -295,7 +295,7 @@ function runCommand(command: string) {
     case "toggleChat": {
       // Only for a tab running Claude Code.
       const tab = tabs[tabIndex];
-      if (tab?.agent) toggleChat(tab.id);
+      if (tab?.agent) toggleChat(tab);
       return;
     }
     case "newTab":
@@ -354,12 +354,12 @@ function useSeenTracking(state: DaemonState | null) {
 function useLongReplyOpening(state: DaemonState | null) {
   const { chatForLongReplies } = useSettings();
   const workspace = state?.workspaces.find((w) => w.id === state.activeWorkspaceId);
-  const tabId = workspace?.activeTabId ?? null;
-  const agent = workspace?.tabs.find((t) => t.id === tabId)?.agent;
-  const longReply = agent?.status === "done" && (agent.replyLines ?? 0) >= LONG_REPLY_LINES ? `${tabId}:${agent.since}` : null;
+  const tab = workspace?.tabs.find((t) => t.id === workspace.activeTabId);
+  const agent = tab?.agent;
+  const longReply = agent?.status === "done" && (agent.replyLines ?? 0) >= LONG_REPLY_LINES ? `${tab?.id}:${agent.since}` : null;
 
   useEffect(() => {
-    if (longReply && tabId && chatForLongReplies && !isChatOpen(tabId)) setChatOpen(tabId, true);
+    if (longReply && tab && chatForLongReplies && !isChatOpen(tab)) setChatOpen(tab, true);
   }, [longReply]);
 }
 

@@ -6,7 +6,7 @@
  * Bumped when a message changes shape or appears, so a UI talking to another
  * Mac's daemon can tell it's a different Miks. Before 2 there was none.
  */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 /**
  * What a coding agent in a pane is up to, as reported by its hooks.
@@ -46,6 +46,12 @@ export type ChatEntry =
 export type Tab = {
   /** Also the pane's id; a tab holds exactly one pane for now. */
   id: string;
+  /**
+   * The same tab across daemon restarts, unlike `id` (a new pane each
+   * time): for what the UI keeps about a tab, like its chat draft. Since
+   * protocol 6.
+   */
+  key?: string;
   /** The title the program set (OSC 0/2), or the shell's name. */
   title: string;
   /** Where the tab's shell is, checked every couple of seconds. */

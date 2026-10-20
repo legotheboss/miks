@@ -267,6 +267,7 @@ test("a restarted daemon brings back the layout, each tab's directory, and its C
   const shellTab = activeTab(first.workspaces.getState());
   const claudeTab = first.workspaces.createTab(workspaceId)!;
   await postHook(claudeTab, { hook_event_name: "SessionStart", session_id: "1234abcd-0000-4000-8000-000000000000" });
+  const keys = first.workspaces.getState().workspaces[0].tabs.map((tab) => tab.key);
 
   // The shell moves; the saved layout should follow it there.
   first.workspaces.getPane(shellTab)!.write(`cd '${subdir}'\n`);
@@ -284,6 +285,10 @@ test("a restarted daemon brings back the layout, each tab's directory, and its C
   expect(workspace.activeTabId).toBe(workspace.tabs[0].id);
 
   const [restoredShell, restoredClaude] = workspace.tabs;
+  // New panes, but the same tabs: what the UI keeps about each comes back.
+  expect(workspace.tabs.map((tab) => tab.key)).toEqual(keys);
+  expect(keys.every(Boolean)).toBe(true);
+  expect(restoredShell.id).not.toBe(shellTab);
   await waitFor(async () => (await daemon.workspaces.getPane(restoredShell.id)!.cwd()) === fs.realpathSync(subdir));
 
   // Each tab keeps its own shell history file.

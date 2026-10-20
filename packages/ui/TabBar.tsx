@@ -17,7 +17,7 @@ const DRAG_GROUP = "tabs";
 
 export function TabBar({ workspace, ...rest }: HTMLAttributes<HTMLDivElement> & { workspace: Workspace }) {
   const activeTab = workspace.tabs.find((tab) => tab.id === workspace.activeTabId);
-  const chatOpen = useChatOpen(activeTab?.id ?? null);
+  const chatOpen = useChatOpen(activeTab ?? null);
 
   // Press and hold a tab to drag it along the bar.
   useDraggable({
@@ -52,7 +52,7 @@ export function TabBar({ workspace, ...rest }: HTMLAttributes<HTMLDivElement> & 
         <button
           className="chat-toggle"
           data-on={chatOpen}
-          onClick={() => toggleChat(activeTab.id)}
+          onClick={() => toggleChat(activeTab)}
           {...tooltip(chatOpen ? "Hide chat" : "Show chat", { hotkey: "cmd+shift+c", delay: true })}
         >
           <PanelRight />
