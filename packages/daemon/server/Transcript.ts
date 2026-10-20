@@ -27,6 +27,8 @@ export class Transcript extends EventEmitter<{ entries: [entries: ChatEntry[]]; 
   private reading = false;
   private readAgain = false;
   private closed = false;
+  /** Resolves once what's already there has been read. */
+  readonly ready: Promise<void>;
 
   constructor(file: string) {
     super();
@@ -34,7 +36,7 @@ export class Transcript extends EventEmitter<{ entries: [entries: ChatEntry[]]; 
     // watchFile, unlike watch, works on a file that doesn't exist yet: a
     // session has a transcript path before it has a message.
     fs.watchFile(file, { interval: POLL_INTERVAL, persistent: false }, () => void this.read());
-    void this.read();
+    this.ready = this.read();
   }
 
   close() {
@@ -55,6 +57,8 @@ export class Transcript extends EventEmitter<{ entries: [entries: ChatEntry[]]; 
         this.readAgain = false;
         await this.readMore();
       } while (this.readAgain && !this.closed);
+    } catch {
+      // Unreadable for now (permissions, say): the next change tries again.
     } finally {
       this.reading = false;
     }
@@ -107,8 +111,9 @@ export class Transcript extends EventEmitter<{ entries: [entries: ChatEntry[]]; 
  * messages Claude Code adds itself.
  */
 export function parseTranscriptLine(line: string): ChatEntry[] {
-  // Most lines are neither, and some are huge: no need to parse those.
-  if (!line.includes('"type":"user"') && !line.includes('"type":"assistant"')) return [];
+  // Most lines are none of these, and some are huge: no need to parse those.
+  const queued = line.includes('"queued_command"');
+  if (!queued && !line.includes('"type":"user"') && !line.includes('"type":"assistant"')) return [];
 
   let record: any;
   try {
@@ -122,6 +127,15 @@ export function parseTranscriptLine(line: string): ChatEntry[] {
   const id: string = record.uuid;
   const time = Date.parse(record.timestamp) || 0;
   const content = record.message?.content;
+
+  // A message you sent while Claude was working, which it took in mid-turn.
+  if (record.type === "attachment") {
+    const attachment = record.attachment;
+    if (!queued || attachment?.type !== "queued_command" || attachment.commandMode !== "prompt") return [];
+    if (attachment.origin?.kind !== "human" || typeof attachment.prompt !== "string") return [];
+    const prompt = promptText(attachment.prompt);
+    return prompt ? [{ id, kind: "prompt", text: prompt, time }] : [];
+  }
 
   if (record.type === "user") {
     const text =
@@ -159,6 +173,9 @@ export function parseTranscriptLine(line: string): ChatEntry[] {
  * brackets). Slash commands and `!` commands are recorded as markup.
  */
 function promptText(text: string): string | null {
+  // Pasted text, recorded inside tags of its own.
+  text = text.replace(/<\/?pasted_content(?: [^>]*)?>/g, "");
+
   const command = text.match(/<command-name>([^<]*)<\/command-name>/)?.[1];
   if (command) {
     const args = text.match(/<command-args>([^<]*)<\/command-args>/)?.[1]?.trim();
@@ -170,7 +187,7 @@ function promptText(text: string): string | null {
 
   const trimmed = text.trim();
   if (!trimmed || trimmed.startsWith("<") || trimmed.startsWith("[Request interrupted")) return null;
-  return text;
+  return trimmed;
 }
 
 /** How much of a tool's input the details hold. */

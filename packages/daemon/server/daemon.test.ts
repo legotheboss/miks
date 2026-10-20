@@ -4,7 +4,7 @@ import os from "os";
 import path from "path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { connectDaemon } from "../shared/connect.ts";
-import type { ClientMessage, DaemonMessage, DaemonState } from "../shared/protocol.ts";
+import type { ChatEntry, ClientMessage, DaemonMessage, DaemonState } from "../shared/protocol.ts";
 import { type Daemon, serve } from "./daemon.ts";
 import { Pane } from "./Pane.ts";
 
@@ -723,7 +723,11 @@ test("the chat panel gets a tab's conversation, then each new message, through i
   const client = await connect();
   await client.state();
   const chats: Extract<DaemonMessage, { type: "chat" }>[] = [];
-  const texts = () => chats.flatMap((chat) => (chat.reset ? [] : chat.entries)).map((entry) => ("text" in entry ? entry.text : ""));
+  // As the UI rebuilds it: a reset replaces the conversation, the rest add to it.
+  const texts = () =>
+    chats
+      .reduce<ChatEntry[]>((all, chat) => (chat.reset ? chat.entries : [...all, ...chat.entries]), [])
+      .map((entry) => ("text" in entry ? entry.text : ""));
   client.send({ type: "watchChat", tabId });
   const watch = async (until: () => boolean) => {
     await waitFor(async () => {
@@ -734,7 +738,9 @@ test("the chat panel gets a tab's conversation, then each new message, through i
   };
 
   await watch(() => texts().join("|") === "Hello|Hi **there**");
+  // Not empty and then filled in: all of it, once it's been read.
   expect(chats[0]).toMatchObject({ reset: true, session: "first" });
+  expect(chats[0].entries).toHaveLength(2);
 
   // Appended in two writes, the second finishing the line.
   const more = message("c", "user", "And then?");

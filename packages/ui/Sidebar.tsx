@@ -88,7 +88,8 @@ export const StyledSidebar = styled.div`
     margin: 8px;
     padding: 8px 10px;
     border: none;
-    border-radius: 8px;
+    /* Concentric with the window's corner, 8px in from it. */
+    border-radius: 16px;
     background: transparent;
     color: ${colors.textSecondary()};
     font: ${fonts.display({ size: 13 })};
@@ -120,7 +121,7 @@ export function dropIndex(items: { id: string }[], movingId: string, target: str
 export const WorkspaceDropTarget = styled.div`
   flex-shrink: 0;
   height: var(--target-height, 0px);
-  border-radius: 8px;
+  border-radius: 16px;
 
   &[data-draggable-hover="true"] {
     background: ${colors.buttonBackgroundGlow()};
@@ -209,7 +210,8 @@ const StyledWorkspaceRow = styled.div`
     flex-flow: column;
     gap: 3px;
     padding: 8px 10px;
-    border-radius: 8px;
+    /* As the New workspace button's, which matches the window's corner. */
+    border-radius: 16px;
 
     &:hover {
       background: ${colors.buttonBackgroundGlow()};

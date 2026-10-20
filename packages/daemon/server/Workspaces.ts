@@ -58,7 +58,10 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
    * The conversation in each tab someone's watching (the chat panel), read
    * from its Claude session's transcript while there's one.
    */
-  private readonly chats = new Map<string, { transcript: Transcript | null; listeners: Set<ChatListener> }>();
+  private readonly chats = new Map<
+    string,
+    { transcript: Transcript | null; ready: boolean; listeners: Set<ChatListener> }
+  >();
   /** Each tab's own shell history file's name, kept across restores. */
   private readonly historyIds = new Map<string, string>();
   /** Each tab's shell's directory, as of the last `pollCwds`. */
@@ -501,12 +504,13 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
 
     let chat = this.chats.get(tabId);
     if (!chat) {
-      chat = { transcript: null, listeners: new Set() };
+      chat = { transcript: null, ready: false, listeners: new Set() };
       this.chats.set(tabId, chat);
       this.updateChat(tabId);
     }
     chat.listeners.add(listener);
-    listener({ session: this.chatSession(tabId), entries: chat.transcript?.entries ?? [], reset: true });
+    // Otherwise it hears it all once the transcript's been read.
+    if (chat.ready) listener({ session: this.chatSession(tabId), entries: chat.transcript?.entries ?? [], reset: true });
 
     return () => {
       const current = this.chats.get(tabId);
@@ -522,19 +526,29 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     if (!chat) return;
 
     const file = this.claudeSessions.get(tabId)?.transcriptPath ?? null;
-    if ((chat.transcript?.file ?? null) === file) return;
+    // Already following it (or, with no session, already said so).
+    if ((chat.transcript?.file ?? null) === file && (chat.transcript || chat.ready)) return;
 
     chat.transcript?.close();
     const transcript = file ? new Transcript(file) : null;
     chat.transcript = transcript;
+    chat.ready = false;
 
     const session = this.chatSession(tabId);
     const tell = (entries: ChatEntry[], reset: boolean) => {
       for (const listener of chat.listeners) listener({ session, entries, reset });
     };
-    transcript?.on("entries", (entries) => tell(entries, false));
-    transcript?.on("reset", () => tell([], true));
-    tell([], true);
+    // All of it at once when it's been read (a long one takes a moment),
+    // rather than an empty conversation that then fills in.
+    const start = () => {
+      if (chat.transcript !== transcript) return;
+      chat.ready = true;
+      tell(transcript?.entries ?? [], true);
+      transcript?.on("entries", (entries) => tell(entries, false));
+      transcript?.on("reset", () => tell([], true));
+    };
+    if (transcript) void transcript.ready.then(start);
+    else start();
   }
 
   private chatSession(tabId: string): string | null {

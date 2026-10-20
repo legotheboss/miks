@@ -1,14 +1,26 @@
 import { colors } from "crosswing/colors";
-import { StyledTextArea, TextArea, type TextAreaRef } from "crosswing/components/forms/TextArea";
+import { PanelLayout } from "crosswing/components/PanelLayout";
+import { StyledTextArea, TextArea } from "crosswing/components/forms/TextArea";
 import { fonts } from "crosswing/fonts";
 import { ModalContext } from "crosswing/modals/context";
+import { tooltip } from "crosswing/modals/popup";
 import { ArrowUp, ChevronRight, Square, TextQuote } from "lucide-react";
 import type { ChatEntry, Tab } from "miks/shared/protocol";
-import { type DragEvent, type KeyboardEvent, type MouseEvent, use, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  type DragEvent,
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactNode,
+  use,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { styled } from "styled-components";
 import { daemon } from "./daemon";
 import { renderMarkdown } from "./markdown";
-import { getSettings, updateSettings } from "./settings";
 import { droppedText, focusActiveTerminal, onDragOver, sendEscape, sendToTerminal } from "./TerminalView";
 
 /**
@@ -35,16 +47,119 @@ const drafts = {
 /** Whether a prompt in the transcript is one sent from here, however its whitespace came out. */
 const sameText = (a: string, b: string) => a.replace(/\s+/g, " ").trim() === b.replace(/\s+/g, " ").trim();
 
+/**
+ * Which tabs have their panel open: each tab's own, like its terminal, and
+ * only ever shown while Claude Code runs in it. Kept in this window's
+ * storage, so a relaunch leaves them as they were.
+ */
+const openTabs = new Set<string>(readOpenTabs());
+const openListeners = new Set<() => void>();
+
+function readOpenTabs(): string[] {
+  try {
+    return JSON.parse(localStorage.getItem("ChatPanel:open") ?? "[]");
+  } catch {
+    return [];
+  }
+}
+
+export function isChatOpen(tabId: string): boolean {
+  return openTabs.has(tabId);
+}
+
+export function setChatOpen(tabId: string, open: boolean) {
+  if (open === openTabs.has(tabId)) return;
+  if (open) openTabs.add(tabId);
+  else openTabs.delete(tabId);
+  try {
+    localStorage.setItem("ChatPanel:open", JSON.stringify([...openTabs]));
+  } catch {}
+  for (const listener of openListeners) listener();
+}
+
+export function useChatOpen(tabId: string | null): boolean {
+  return useSyncExternalStore(
+    (listener) => {
+      openListeners.add(listener);
+      return () => openListeners.delete(listener);
+    },
+    () => !!tabId && openTabs.has(tabId),
+  );
+}
+
 /** Set when you open the panel yourself: the composer takes the keyboard. */
 let focusOnShow = false;
 
-/** Shows or hides the panel (⌘⇧C, or the tab bar's button), moving the keyboard with it. */
-export function toggleChat() {
-  const visible = !getSettings().chatVisible;
-  if (visible) focusOnShow = true;
+/** Opens or closes a tab's panel (⌘⇧C, or the tab bar's button), moving the keyboard with it. */
+export function toggleChat(tabId: string) {
+  const open = !openTabs.has(tabId);
+  if (open) focusOnShow = true;
   else focusActiveTerminal();
-  updateSettings({ chatVisible: visible });
+  setChatOpen(tabId, open);
 }
+
+/**
+ * A tab's area: its terminal, and beside it (or, where that would leave the
+ * terminal under 600px, over it) its chat panel, while Claude Code runs in it.
+ */
+export function ChatLayout({
+  tab,
+  active,
+  supported,
+  children,
+}: {
+  tab: Tab;
+  active: boolean;
+  supported: boolean;
+  children: ReactNode;
+}) {
+  const visible = useChatOpen(tab.id) && !!tab.agent;
+
+  return (
+    <StyledChatLayout data-active={active}>
+      <PanelLayout
+        edge="right"
+        mode="auto"
+        panelVisible={visible}
+        onPanelVisibleChange={(open) => {
+          setChatOpen(tab.id, open);
+          if (!open) focusActiveTerminal();
+        }}
+        panelDefaultSize={420}
+        panelMinSize={300}
+        panelMaxSize={900}
+        contentMinSize={600}
+        hotkey={null}
+        hideToolbarButton
+        hideDragHandle
+        restorationKey={ChatPanel}
+      >
+        <div className="terminal-area">{children}</div>
+        <ChatPanel tab={tab} visible={visible} supported={supported} />
+      </PanelLayout>
+    </StyledChatLayout>
+  );
+}
+
+const StyledChatLayout = styled.div`
+  position: absolute;
+  inset: 0;
+  display: flex;
+  visibility: hidden;
+
+  &[data-active="true"] {
+    visibility: visible;
+  }
+
+  > * {
+    flex-grow: 1;
+    min-width: 0;
+  }
+
+  .terminal-area {
+    position: relative;
+  }
+`;
 
 /**
  * The tab's Claude Code conversation, for reading in proportional type with
@@ -53,14 +168,14 @@ export function toggleChat() {
  * sent from here is typed into the terminal, so the terminal stays the
  * truth: this is another view of it.
  */
-export function ChatPanel({ tab, visible, supported }: { tab: Tab | null; visible: boolean; supported: boolean }) {
+export function ChatPanel({ tab, visible, supported }: { tab: Tab; visible: boolean; supported: boolean }) {
   return (
     <StyledChatPanel>
-      {!supported ? (
+      {supported ? (
+        <Conversation tab={tab} visible={visible} />
+      ) : (
         <div className="note">This tab's Mac has an older Miks. Update it there to see conversations here.</div>
-      ) : tab ? (
-        <Conversation key={tab.id} tab={tab} visible={visible} />
-      ) : null}
+      )}
     </StyledChatPanel>
   );
 }
@@ -94,7 +209,7 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
   const [pending, setPending] = useState<{ id: string; text: string; time: number }[]>([]);
   const [quote, setQuote] = useState<{ text: string; top: number; left: number } | null>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
-  const textAreaRef = useRef<TextAreaRef>(null);
+  const composerRef = useRef<HTMLFormElement>(null);
   const atBottom = useRef(true);
   const { showToast } = use(ModalContext);
 
@@ -121,7 +236,7 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
   useEffect(() => {
     if (!visible || !focusOnShow) return;
     focusOnShow = false;
-    textAreaRef.current?.focus(Number.MAX_SAFE_INTEGER);
+    focusComposer();
   }, [visible]);
 
   // New messages keep it at the bottom, unless you've scrolled up to read.
@@ -129,6 +244,14 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
     const scroller = scrollerRef.current;
     if (scroller && atBottom.current) scroller.scrollTop = scroller.scrollHeight;
   }, [chat, pending]);
+
+  // Without scrolling: the panel may still be sliding in, and the browser
+  // would scroll the whole tab sideways to bring the field into view.
+  function focusComposer() {
+    const textarea = composerRef.current?.querySelector("textarea");
+    textarea?.focus({ preventScroll: true });
+    textarea?.setSelectionRange(textarea.value.length, textarea.value.length);
+  }
 
   function changeText(next: string) {
     setText(next);
@@ -138,7 +261,7 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
   function insert(addition: string) {
     const joined = text && !text.endsWith("\n") && !text.endsWith(" ") ? `${text} ${addition}` : text + addition;
     changeText(joined);
-    textAreaRef.current?.focus(Number.MAX_SAFE_INTEGER);
+    focusComposer();
   }
 
   const status = tab.agent?.status;
@@ -197,7 +320,7 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
     setQuote(null);
     window.getSelection()?.removeAllRanges();
     changeText((text ? text.replace(/\n*$/, "\n\n") : "") + quoted + "\n\n");
-    textAreaRef.current?.focus(Number.MAX_SAFE_INTEGER);
+    focusComposer();
   }
 
   // Code's copy buttons, and links (which open in the browser).
@@ -275,6 +398,7 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
       </div>
       <form
         className="composer"
+        ref={composerRef}
         onSubmit={(event) => {
           event.preventDefault();
           send();
@@ -283,7 +407,6 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
         onDrop={onDrop}
       >
         <TextArea
-          ref={textAreaRef}
           value={text}
           onValueChange={changeText}
           onKeyDown={onKeyDown}
@@ -295,11 +418,11 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
           rows={1}
         />
         {status === "working" && !text ? (
-          <button type="button" className="send" title="Stop (Escape in the terminal)" onClick={() => sendEscape(tab.id)}>
+          <button type="button" className="send" {...tooltip("Stop", { delay: true })} onClick={() => sendEscape(tab.id)}>
             <Square size={12} fill="currentColor" />
           </button>
         ) : (
-          <button type="submit" className="send" title="Send (⌘Return)" disabled={!canSend}>
+          <button type="submit" className="send" {...tooltip("Send", { hotkey: "cmd+Enter", delay: true })} disabled={!canSend}>
             <ArrowUp size={16} />
           </button>
         )}

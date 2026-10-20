@@ -789,9 +789,9 @@ function buildMenu() {
       submenu: [
         command("nextTab", "CmdOrCtrl+Shift+]", "Next tab"),
         command("previousTab", "CmdOrCtrl+Shift+[", "Previous tab"),
-        // As in cmux.
-        command("nextWorkspace", "Cmd+Ctrl+]", "Next workspace"),
-        command("previousWorkspace", "Cmd+Ctrl+[", "Previous workspace"),
+        // Arrows, which fingers find more easily than cmux's ⌘⌃[ ].
+        command("nextWorkspace", "Cmd+Ctrl+Right", "Next workspace"),
+        command("previousWorkspace", "Cmd+Ctrl+Left", "Previous workspace"),
         { type: "separator" },
         ...Array.from({ length: 9 }, (_, i) => command(`workspace${i + 1}`, `CmdOrCtrl+${i + 1}`, `Workspace ${i + 1}`)),
         { type: "separator" },

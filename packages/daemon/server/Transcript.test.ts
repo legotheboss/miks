@@ -52,3 +52,18 @@ test("an edit's details read like a diff", () => {
   );
   expect(edit).toMatchObject({ summary: "/a.ts", detail: "- a\n- b\n+ c" });
 });
+
+test("pasted messages, and ones sent while Claude was working, are prompts too", () => {
+  const pasted = '\n\n<pasted_content id="a08f">\nSome things:\n\n- one\n</pasted_content id="a08f">\n';
+  expect(parseTranscriptLine(line({ type: "user", message: { content: pasted } }))[0]).toMatchObject({
+    kind: "prompt",
+    text: "Some things:\n\n- one",
+  });
+
+  const queued = { type: "queued_command", prompt: "Also this", commandMode: "prompt", origin: { kind: "human" } };
+  expect(parseTranscriptLine(line({ type: "attachment", attachment: queued }))).toEqual([
+    { id: "u1", kind: "prompt", text: "Also this", time: Date.parse("2026-10-20T12:00:00.000Z") },
+  ]);
+  const fromAgent = { ...queued, origin: { kind: "task-notification" } };
+  expect(parseTranscriptLine(line({ type: "attachment", attachment: fromAgent }))).toEqual([]);
+});

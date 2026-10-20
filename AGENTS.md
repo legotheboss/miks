@@ -204,7 +204,9 @@ resizes); keep it passing.
   one line per message (and per content block), each written once it's
   done, so text shows up when a block finishes, not as it streams. The
   format isn't a documented API, so the parser takes prompts, text and
-  `tool_use` and skips everything else. Files run past 100MB (tool output),
+  `tool_use` and skips everything else. Pasted text comes wrapped in
+  `<pasted_content …>` tags, and a message sent while Claude works is an
+  `attachment` line (`queued_command`), not a user message. Files run past 100MB (tool output),
   so a cheap substring check comes before `JSON.parse`. A 130MB one reads
   in about 300ms, in chunks, without holding up the event loop. `fs.watchFile`,
   not `fs.watch`, because a session has its path before the file exists.
@@ -213,6 +215,11 @@ resizes); keep it passing.
   `replyLines`, which is how a long reply opens the panel. crosswing's
   `TextArea` with `autoTrim={false}` never takes a new `value` from outside
   (it wouldn't clear after sending), so the composer keeps the default.
+  Each tab has its own panel, in its own area (`ChatLayout`), open or not
+  per tab (window storage), and shown only while `tab.agent` is set.
+  Focus the composer with `preventScroll`: focusing it while the panel
+  slides in scrolls the whole tab sideways, which looks like the terminal
+  narrowing.
 
 - Settings (`miks/shared/settings`) live in `settings.json`, owned by the
   Electron main process and pushed to every window; not localStorage, which

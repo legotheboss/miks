@@ -4,11 +4,11 @@ import { PanelRight, Plus, RotateCw, X } from "lucide-react";
 import type { Tab, Workspace } from "miks/shared/protocol";
 import { Fragment, HTMLAttributes } from "react";
 import { styled } from "styled-components";
-import { toggleChat } from "./ChatPanel";
+import { toggleChat, useChatOpen } from "./ChatPanel";
 import { closeTab } from "./closing";
 import { daemon } from "./daemon";
 import { useDraggable } from "crosswing/components/draggable/useDraggable";
-import { useSettings } from "./settings";
+import { tooltip } from "crosswing/modals/popup";
 import { dropIndex } from "./Sidebar";
 import { tabTitle } from "./status";
 import { StatusDot } from "./StatusDot";
@@ -16,7 +16,8 @@ import { StatusDot } from "./StatusDot";
 const DRAG_GROUP = "tabs";
 
 export function TabBar({ workspace, ...rest }: HTMLAttributes<HTMLDivElement> & { workspace: Workspace }) {
-  const { chatVisible } = useSettings();
+  const activeTab = workspace.tabs.find((tab) => tab.id === workspace.activeTabId);
+  const chatOpen = useChatOpen(activeTab?.id ?? null);
 
   // Press and hold a tab to drag it along the bar.
   useDraggable({
@@ -40,15 +41,23 @@ export function TabBar({ workspace, ...rest }: HTMLAttributes<HTMLDivElement> & 
       ))}
       <button
         className="new-tab"
-        title="New tab (⌘T)"
+        {...tooltip("New tab", { hotkey: "cmd+t", delay: true })}
         onClick={() => daemon.send({ type: "createTab", workspaceId: workspace.id })}
       >
         <Plus />
       </button>
       <div className="spacer" />
-      <button className="chat-toggle" title="Chat (⌘⇧C)" data-on={chatVisible} onClick={toggleChat}>
-        <PanelRight />
-      </button>
+      {/* The tab's conversation, so only while Claude Code runs in it. */}
+      {activeTab?.agent && (
+        <button
+          className="chat-toggle"
+          data-on={chatOpen}
+          onClick={() => toggleChat(activeTab.id)}
+          {...tooltip(chatOpen ? "Hide chat" : "Show chat", { hotkey: "cmd+shift+c", delay: true })}
+        >
+          <PanelRight />
+        </button>
+      )}
     </StyledTabBar>
   );
 }
