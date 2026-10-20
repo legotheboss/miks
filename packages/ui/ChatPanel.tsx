@@ -1,5 +1,5 @@
 import { colors } from "crosswing/colors";
-import { PanelLayout } from "crosswing/components/PanelLayout";
+import { PanelLayout, PanelLayoutContext } from "crosswing/components/PanelLayout";
 import { StyledTextArea, TextArea } from "crosswing/components/forms/TextArea";
 import { fonts } from "crosswing/fonts";
 import { ModalContext } from "crosswing/modals/context";
@@ -117,9 +117,37 @@ export function ChatLayout({
   children: ReactNode;
 }) {
   const visible = useChatOpen(tab.id) && !!tab.agent;
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Coming back to the tab, the keyboard goes back where it was: into the
+  // panel, if it was there. And always into the panel when it covers the
+  // terminal. Where it was is read first (layout effects run before the
+  // rest), because the terminal takes the keyboard as it comes on screen,
+  // which would record that instead; this puts it back after.
+  const returnTo = useRef<"composer" | "conversation" | undefined>(undefined);
+  useLayoutEffect(() => {
+    returnTo.current = active ? panelFocus.get(tab.id) : undefined;
+  }, [active]);
+
+  useEffect(() => {
+    const root = ref.current;
+    if (!active || !visible || !root) return;
+    const overlay = root.querySelector(":scope > [data-mode]")?.getAttribute("data-mode") === "overlay";
+    const where = returnTo.current;
+    if (where || overlay) focusPanel(root, where ?? "composer");
+  }, [active]);
 
   return (
-    <StyledChatLayout data-active={active}>
+    <StyledChatLayout
+      data-active={active}
+      ref={ref}
+      onFocus={(event) => {
+        const target = event.target as HTMLElement;
+        const where = target.closest(".composer") ? "composer" : target.closest(".scroller") ? "conversation" : null;
+        if (where) panelFocus.set(tab.id, where);
+        else panelFocus.delete(tab.id);
+      }}
+    >
       <PanelLayout
         edge="right"
         mode="auto"
@@ -137,10 +165,54 @@ export function ChatLayout({
         hideDragHandle
         restorationKey={ChatPanel}
       >
-        <div className="terminal-area">{children}</div>
+        <TerminalArea active={active}>{children}</TerminalArea>
         <ChatPanel tab={tab} visible={visible} supported={supported} />
       </PanelLayout>
     </StyledChatLayout>
+  );
+}
+
+/** Where in its panel each tab had the keyboard last, if it was there. */
+const panelFocus = new Map<string, "composer" | "conversation">();
+
+/** The composer, unless it's disabled (no session yet): then the conversation. */
+function focusPanel(root: HTMLElement, where: "composer" | "conversation") {
+  const composer = root.querySelector<HTMLTextAreaElement>(".composer textarea");
+  const target = where === "composer" && composer && !composer.disabled ? composer : root.querySelector<HTMLElement>(".scroller");
+  target?.focus({ preventScroll: true });
+}
+
+/**
+ * The terminal's side. While the panel covers it (overlay mode), it can't
+ * have the keyboard, or you'd type behind the shade: the keyboard goes into
+ * the panel instead, and back once the panel's gone.
+ */
+function TerminalArea({ active, children }: { active: boolean; children: ReactNode }) {
+  const { panelVisible, panelMode } = use(PanelLayoutContext);
+  const covered = panelVisible && panelMode === "overlay";
+  const ref = useRef<HTMLDivElement>(null);
+  const wasCovered = useRef(covered);
+
+  useEffect(() => {
+    const before = wasCovered.current;
+    wasCovered.current = covered;
+    if (!active || covered === before) return;
+
+    const root = ref.current?.closest<HTMLElement>("[data-active]");
+    if (covered && root) focusPanel(root, "composer");
+    // Only if the keyboard's nowhere, or in the panel that just closed
+    // (inert now, though the browser takes a while to notice), not when a
+    // wider window lets the panel move aside.
+    else if (!covered) {
+      const focused = document.activeElement;
+      if (!focused || focused === document.body || focused.closest("[inert]")) focusActiveTerminal();
+    }
+  }, [covered]);
+
+  return (
+    <div className="terminal-area" ref={ref} inert={covered}>
+      {children}
+    </div>
   );
 }
 
@@ -253,6 +325,14 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
     if (scroller && atBottom.current) scroller.scrollTop = scroller.scrollHeight;
   }, [chat, pending]);
 
+  // Escape goes back to the terminal; over it, there's no getting to it but
+  // by closing the panel.
+  const { panelMode } = use(PanelLayoutContext);
+  function leave() {
+    if (panelMode === "overlay") setChatOpen(tab.id, false);
+    else focusActiveTerminal();
+  }
+
   // Without scrolling: the panel may still be sliding in, and the browser
   // would scroll the whole tab sideways to bring the field into view.
   function focusComposer() {
@@ -293,7 +373,7 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
       send();
     } else if (event.key === "Escape") {
       event.preventDefault();
-      focusActiveTerminal();
+      leave();
     }
   }
 
@@ -374,7 +454,7 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
             focusComposer();
           } else if (event.key === "Escape") {
             event.preventDefault();
-            focusActiveTerminal();
+            leave();
           }
         }}
         onMouseUp={onMouseUp}
@@ -550,6 +630,8 @@ const StyledChatPanel = styled.div`
         overflow-wrap: anywhere;
         padding: 8px 12px;
         border-radius: 14px;
+        /* Your own words: no need for the replies' roomier lines. */
+        font: ${fonts.display({ size: 14, line: "21px" })};
         background: ${colors.darkBlue()};
         color: ${colors.white()};
 
@@ -584,8 +666,9 @@ const StyledChatPanel = styled.div`
         padding-left: 22px;
       }
 
+      /* Items often run to a few lines each: a gap tells them apart. */
       li + li {
-        margin-top: 4px;
+        margin-top: 8px;
       }
 
       li > ul,

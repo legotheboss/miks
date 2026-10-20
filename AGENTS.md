@@ -219,7 +219,12 @@ resizes); keep it passing.
   per tab (window storage), and shown only while `tab.agent` is set.
   Focus the composer with `preventScroll`: focusing it while the panel
   slides in scrolls the whole tab sideways, which looks like the terminal
-  narrowing.
+  narrowing. A tab remembers whether the keyboard was in its panel and
+  puts it back there on returning, reading that in a layout effect,
+  before the terminal's own focus on coming on screen overwrites it. In
+  overlay mode the terminal is `inert`. A background window (as in
+  `MIKS_BACKGROUND` tests) gets no focus events at all, so test focus with
+  CDP's `Emulation.setFocusEmulationEnabled`.
 
 - Settings (`miks/shared/settings`) live in `settings.json`, owned by the
   Electron main process and pushed to every window; not localStorage, which
