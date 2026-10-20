@@ -8,6 +8,7 @@ import { type AgentStatus, type DaemonState, PROTOCOL_VERSION } from "miks/share
 import { DEFAULT_SETTINGS } from "miks/shared/settings";
 import { useEffect, useRef } from "react";
 import { styled } from "styled-components";
+import { ChatPanel, toggleChat } from "./ChatPanel";
 import { closeTab, closeWorkspace } from "./closing";
 import { daemon, type Target, useDaemon, useTarget } from "./daemon";
 import { getSettings, setFontSize, updateSettings, useSettings } from "./settings";
@@ -15,11 +16,19 @@ import { Sidebar } from "./Sidebar";
 import { workspaceTitle } from "./status";
 import { StyledTabBar, TabBar } from "./TabBar";
 import { SettingsDialog, type SettingsTab } from "./SettingsDialog";
-import { clearActiveTerminal, selectLastCommand, TERMINAL_BACKGROUND, TerminalView } from "./TerminalView";
+import {
+  clearActiveTerminal,
+  selectLastCommand,
+  TERMINAL_BACKGROUND,
+  TerminalView,
+} from "./TerminalView";
+
+/** A reply at least this long opens the chat panel, if that's on. */
+const LONG_REPLY_LINES = 20;
 
 export function App() {
   const { state, connected, error, retrying } = useDaemon();
-  const { sidebarVisible } = useSettings();
+  const { sidebarVisible, chatVisible } = useSettings();
   const target = useTarget();
 
   const settingsTab = useRef<SettingsTab>("general");
@@ -45,6 +54,7 @@ export function App() {
   useSeenTracking(state);
   useAppearanceReporting(connected);
   useAgentNotifications(state);
+  useLongReplyOpening(state);
 
   if (!connected || !state) {
     return (
@@ -62,6 +72,7 @@ export function App() {
   }
 
   const activeWorkspace = state.workspaces.find((w) => w.id === state.activeWorkspaceId) ?? null;
+  const activeTab = activeWorkspace?.tabs.find((tab) => tab.id === activeWorkspace.activeTabId) ?? null;
 
   return (
     <StyledApp>
@@ -92,24 +103,42 @@ export function App() {
             </div>
           )}
           {activeWorkspace ? <TabBar workspace={activeWorkspace} /> : <div className="empty-bar" />}
-          <div className="terminals">
-            {/* Every tab's terminal stays mounted, so switching is instant. */}
-            {state.workspaces.flatMap((workspace) =>
-              workspace.tabs.map((tab) => (
-                <TerminalView
-                  key={tab.id}
-                  tabId={tab.id}
-                  active={workspace.id === state.activeWorkspaceId && tab.id === workspace.activeTabId}
-                />
-              )),
-            )}
-            {!activeWorkspace && (
-              <div className="empty">
-                {/* Only for a daemon from before it replaced the last workspace itself. */}
-                <Button newStyle bordered onClick={() => daemon.send({ type: "createWorkspace" })} children="New workspace" />
-              </div>
-            )}
-          </div>
+          <PanelLayout
+            className="chat-layout"
+            edge="right"
+            // Beside the terminal, so you can read here and watch it there.
+            mode="shrink"
+            panelVisible={chatVisible}
+            onPanelVisibleChange={(visible) => updateSettings({ chatVisible: visible })}
+            panelDefaultSize={420}
+            panelMinSize={300}
+            panelMaxSize={900}
+            contentMinSize={320}
+            hotkey={null}
+            hideToolbarButton
+            hideDragHandle
+            restorationKey={ChatPanel}
+          >
+            <div className="terminals">
+              {/* Every tab's terminal stays mounted, so switching is instant. */}
+              {state.workspaces.flatMap((workspace) =>
+                workspace.tabs.map((tab) => (
+                  <TerminalView
+                    key={tab.id}
+                    tabId={tab.id}
+                    active={workspace.id === state.activeWorkspaceId && tab.id === workspace.activeTabId}
+                  />
+                )),
+              )}
+              {!activeWorkspace && (
+                <div className="empty">
+                  {/* Only for a daemon from before it replaced the last workspace itself. */}
+                  <Button newStyle bordered onClick={() => daemon.send({ type: "createWorkspace" })} children="New workspace" />
+                </div>
+              )}
+            </div>
+            <ChatPanel tab={activeTab} visible={chatVisible} supported={(state.protocol ?? 1) >= 5} />
+          </PanelLayout>
         </div>
         <Sidebar workspaces={state.workspaces} activeWorkspaceId={state.activeWorkspaceId} home={state.home} />
       </PanelLayout>
@@ -152,8 +181,10 @@ export const StyledApp = styled.div`
       order: 0;
     }
 
-    > .terminals {
+    > .chat-layout {
       order: 2;
+      flex-grow: 1;
+      min-height: 0;
     }
 
     /* With the sidebar hidden, the traffic lights sit over the tab bar. */
@@ -166,7 +197,7 @@ export const StyledApp = styled.div`
       -webkit-app-region: drag;
     }
 
-    > .terminals {
+    .terminals {
       flex-grow: 1;
       position: relative;
       overflow: hidden;
@@ -247,6 +278,8 @@ function runCommand(command: string) {
   switch (command) {
     case "toggleSidebar":
       return updateSettings({ sidebarVisible: !getSettings().sidebarVisible });
+    case "toggleChat":
+      return toggleChat();
     case "fontBigger":
       return setFontSize(getSettings().fontSize + 1);
     case "fontSmaller":
@@ -327,6 +360,22 @@ function useSeenTracking(state: DaemonState | null) {
     window.addEventListener("focus", markSeen);
     return () => window.removeEventListener("focus", markSeen);
   }, [doneTabId]);
+}
+
+/**
+ * Opens the chat panel when the tab you're looking at finishes a long reply,
+ * which reads better there. Leaves the keyboard in the terminal.
+ */
+function useLongReplyOpening(state: DaemonState | null) {
+  const { chatForLongReplies } = useSettings();
+  const workspace = state?.workspaces.find((w) => w.id === state.activeWorkspaceId);
+  const agent = workspace?.tabs.find((t) => t.id === workspace.activeTabId)?.agent;
+  const longReply =
+    agent?.status === "done" && (agent.replyLines ?? 0) >= LONG_REPLY_LINES ? `${workspace?.activeTabId}:${agent.since}` : null;
+
+  useEffect(() => {
+    if (longReply && chatForLongReplies && !getSettings().chatVisible) updateSettings({ chatVisible: true });
+  }, [longReply]);
 }
 
 /**

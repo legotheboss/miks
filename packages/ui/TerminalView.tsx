@@ -5,7 +5,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { ITheme, Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useMatchMedia } from "crosswing/hooks/useMatchMedia";
-import { ModalContext } from "crosswing/modals/context";
+import { ModalContext, type ModalContextValue } from "crosswing/modals/context";
 import { displayPath } from "miks/shared/settings";
 import { DragEvent, HTMLAttributes, use, useEffect, useRef } from "react";
 import { styled } from "styled-components";
@@ -49,7 +49,9 @@ export function TerminalView({
     });
     const fit = new FitAddon();
     const commands = trackCommands(terminal);
-    viewRef.current = { tabId, terminal, fit, commands };
+    const view = { tabId, terminal, fit, commands };
+    viewRef.current = view;
+    views.set(tabId, view);
 
     terminal.loadAddon(fit);
     terminal.loadAddon(new Unicode11Addon());
@@ -118,6 +120,7 @@ export function TerminalView({
       webglAddons.get(terminal)?.dispose();
       terminal.dispose();
       viewRef.current = null;
+      if (views.get(tabId) === view) views.delete(tabId);
     };
     // The theme is applied below, without rebuilding the terminal.
   }, [tabId]);
@@ -164,49 +167,61 @@ export function TerminalView({
     };
   }, [active]);
 
-  // Dropping files types their paths, escaped the way Terminal.app does it,
-  // which is also how Claude Code recognizes a dropped image. On a window on
-  // another Mac they're copied to a temporary folder there first. With ⌥ held
-  // they're copied into the tab's folder instead (on either Mac), and nothing
-  // is typed.
   async function onDrop(event: DragEvent<HTMLDivElement>) {
-    event.preventDefault();
-    const dropped = Array.from(event.dataTransfer.files)
-      .map((file) => window.miks?.pathForFile(file))
-      .filter(Boolean) as string[];
-    if (dropped.length === 0 || !window.miks) return;
+    const text = await droppedText(event, tabId, showToast);
+    if (!text) return;
 
-    if (event.altKey) {
-      const saved = await window.miks.sendFiles(tabId, dropped, "cwd");
-      if (saved.length === 0) return showToast({ title: "Couldn't copy into this folder", destructive: true });
-      const folder = saved[0].slice(0, saved[0].lastIndexOf("/"));
-      const { hidePathPrefix } = getSettings();
-      return showToast({
-        title: saved.length === 1 ? `Copied ${saved[0].slice(folder.length + 1)}` : `Copied ${saved.length} items`,
-        message: `Into ${displayPath(folder, hidePathPrefix, daemon.getSnapshot().state?.home ?? null)}`,
-      });
-    }
-
-    const paths = isRemote() ? await window.miks.sendFiles(tabId, dropped, "tmp") : dropped;
-    if (paths.length === 0) return;
-
-    viewRef.current?.terminal.paste(paths.map(shellEscape).join(" ") + " ");
+    viewRef.current?.terminal.paste(text);
     viewRef.current?.terminal.focus();
   }
 
   return (
-    <StyledTerminalView
-      ref={containerRef}
-      data-active={active}
-      onDragOver={(event) => {
-        event.preventDefault();
-        // Finder's "+": what it does with ⌥ held, and never a move.
-        event.dataTransfer.dropEffect = "copy";
-      }}
-      onDrop={onDrop}
-      {...rest}
-    />
+    <StyledTerminalView ref={containerRef} data-active={active} onDragOver={onDragOver} onDrop={onDrop} {...rest} />
   );
+}
+
+export function onDragOver(event: DragEvent) {
+  event.preventDefault();
+  // Finder's "+": what it does with ⌥ held, and never a move.
+  event.dataTransfer.dropEffect = "copy";
+}
+
+/**
+ * What dropping files on a tab types: their paths, escaped the way
+ * Terminal.app does it, which is also how Claude Code recognizes a dropped
+ * image. On a window on another Mac they're copied to a temporary folder
+ * there first. With ⌥ held they're copied into the tab's folder instead (on
+ * either Mac), with a toast, and nothing is typed.
+ */
+export async function droppedText(
+  event: DragEvent,
+  tabId: string,
+  showToast: ModalContextValue["showToast"],
+): Promise<string | null> {
+  event.preventDefault();
+  const altKey = event.altKey;
+  const dropped = Array.from(event.dataTransfer.files)
+    .map((file) => window.miks?.pathForFile(file))
+    .filter(Boolean) as string[];
+  if (dropped.length === 0 || !window.miks) return null;
+
+  if (altKey) {
+    const saved = await window.miks.sendFiles(tabId, dropped, "cwd");
+    if (saved.length === 0) {
+      showToast({ title: "Couldn't copy into this folder", destructive: true });
+      return null;
+    }
+    const folder = saved[0].slice(0, saved[0].lastIndexOf("/"));
+    const { hidePathPrefix } = getSettings();
+    showToast({
+      title: saved.length === 1 ? `Copied ${saved[0].slice(folder.length + 1)}` : `Copied ${saved.length} items`,
+      message: `Into ${displayPath(folder, hidePathPrefix, daemon.getSnapshot().state?.home ?? null)}`,
+    });
+    return null;
+  }
+
+  const paths = isRemote() ? await window.miks.sendFiles(tabId, dropped, "tmp") : dropped;
+  return paths.length > 0 ? paths.map(shellEscape).join(" ") + " " : null;
 }
 
 function shellEscape(path: string): string {
@@ -217,6 +232,26 @@ function shellEscape(path: string): string {
 type View = { tabId: string; terminal: Terminal; fit: FitAddon; commands: ReturnType<typeof trackCommands> };
 
 let activeView: View | null = null;
+const views = new Map<string, View>();
+
+/**
+ * Types a message into the tab and presses Return, as the chat panel sends
+ * one: pasted, so its newlines stay in the message, and Return a moment
+ * later as a keystroke of its own, or Claude Code takes it as part of the
+ * paste.
+ */
+export function sendToTerminal(tabId: string, text: string) {
+  const view = views.get(tabId);
+  if (!view) return;
+
+  view.terminal.paste(text);
+  setTimeout(() => daemon.send({ type: "input", tabId, data: "\r" }), 100);
+}
+
+/** Interrupts what the tab's program is doing, as Escape would. */
+export function sendEscape(tabId: string) {
+  daemon.send({ type: "input", tabId, data: "\x1b" });
+}
 
 /** Gives the keyboard back to the terminal on screen (after a dialog, say). */
 export function focusActiveTerminal() {

@@ -21,6 +21,10 @@ export type Settings = {
   notifications: boolean;
   /** Whether the sidebar is showing (⌘B). */
   sidebarVisible: boolean;
+  /** Whether the chat panel is showing (⌘⇧C): the tab's Claude Code conversation, to read and reply to. */
+  chatVisible: boolean;
+  /** Whether a long reply opens the chat panel when it's done. */
+  chatForLongReplies: boolean;
   /** Whether the daemon, and every terminal, outlives quitting the app. */
   keepDaemonRunning: boolean;
   /** Whether Miks keeps its hooks in Claude Code's settings, for agent status. */
@@ -35,6 +39,8 @@ export const DEFAULT_SETTINGS: Settings = {
   hidePathPrefix: "",
   notifications: true,
   sidebarVisible: true,
+  chatVisible: false,
+  chatForLongReplies: true,
   keepDaemonRunning: false,
   claudeHooks: true,
   optionAsMeta: true,

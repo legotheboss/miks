@@ -65,6 +65,12 @@ function GeneralSettings() {
         onClick={() => updateSettings({ notifications: !settings.notifications })}
       />
       <LabeledToggle
+        label="Open chat for long replies"
+        detail="When Claude finishes a reply of 20 lines or more in the tab you're looking at, the chat panel (⌘⇧C) opens to show it."
+        on={settings.chatForLongReplies}
+        onClick={() => updateSettings({ chatForLongReplies: !settings.chatForLongReplies })}
+      />
+      <LabeledToggle
         label="Claude Code status"
         detail="Adds hooks to ~/.claude/settings.json that tell Miks what Claude is up to. Outside Miks they do nothing."
         on={settings.claudeHooks}

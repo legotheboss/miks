@@ -709,6 +709,54 @@ test("a tab is called by the program in front, unless that program titled it", a
   await waitFor(() => title() === "sleep");
 });
 
+test("the chat panel gets a tab's conversation, then each new message, through its sessions", async () => {
+  daemon.workspaces.createWorkspace({ cwd: home });
+  const tabId = activeTab(daemon.workspaces.getState());
+  const first = path.join(home, "first.jsonl");
+  const second = path.join(home, "second.jsonl");
+  const message = (uuid: string, type: "user" | "assistant", text: string) =>
+    JSON.stringify({ type, uuid, timestamp: new Date().toISOString(), message: { role: type, content: type === "user" ? text : [{ type: "text", text }] } }) + "\n";
+
+  fs.writeFileSync(first, message("a", "user", "Hello") + message("b", "assistant", "Hi **there**"));
+  await postHook(tabId, { hook_event_name: "SessionStart", session_id: "first", transcript_path: first });
+
+  const client = await connect();
+  await client.state();
+  const chats: Extract<DaemonMessage, { type: "chat" }>[] = [];
+  const texts = () => chats.flatMap((chat) => (chat.reset ? [] : chat.entries)).map((entry) => ("text" in entry ? entry.text : ""));
+  client.send({ type: "watchChat", tabId });
+  const watch = async (until: () => boolean) => {
+    await waitFor(async () => {
+      chats.length = 0;
+      chats.push(...(await client.chats(tabId)));
+      return until();
+    });
+  };
+
+  await watch(() => texts().join("|") === "Hello|Hi **there**");
+  expect(chats[0]).toMatchObject({ reset: true, session: "first" });
+
+  // Appended in two writes, the second finishing the line.
+  const more = message("c", "user", "And then?");
+  fs.appendFileSync(first, more.slice(0, 20));
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  fs.appendFileSync(first, more.slice(20));
+  await watch(() => texts().join("|") === "Hello|Hi **there**|And then?");
+
+  // A new session (/clear) starts the conversation over.
+  fs.writeFileSync(second, message("d", "user", "Fresh start"));
+  await postHook(tabId, { hook_event_name: "SessionStart", session_id: "second", transcript_path: second });
+  await watch(() => texts().at(-1) === "Fresh start");
+  const reset = chats.findLast((chat) => chat.reset)!;
+  expect(reset).toMatchObject({ session: "second" });
+  expect(chats.slice(chats.indexOf(reset)).flatMap((chat) => chat.entries).map((entry) => entry.id)).toEqual(["d"]);
+
+  // The reply's length, for opening the panel on long ones.
+  await postHook(tabId, { hook_event_name: "Stop", session_id: "second", transcript_path: second, last_assistant_message: "a\nb\nc" });
+  await waitFor(() => daemon.workspaces.getState().workspaces[0].tabs[0].agent?.replyLines === 3);
+  client.close();
+});
+
 test("the hook script posts to the daemon from inside a pane", async () => {
   daemon.workspaces.createWorkspace({ cwd: home });
   const tabId = activeTab(daemon.workspaces.getState());
@@ -860,6 +908,8 @@ async function connect() {
       const message = await until(() => messages.findLast((m) => m.type === "state"));
       return message.state;
     },
+    chats: async (tabId: string) =>
+      messages.filter((m) => m.type === "chat" && m.tabId === tabId) as Extract<DaemonMessage, { type: "chat" }>[],
     snapshotMessage: (tabId: string) =>
       until(() => messages.find((m) => m.type === "snapshot" && m.tabId === tabId) as
         | Extract<DaemonMessage, { type: "snapshot" }>

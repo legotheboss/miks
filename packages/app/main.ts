@@ -749,6 +749,7 @@ function buildMenu() {
       label: "View",
       submenu: [
         command("toggleSidebar", "CmdOrCtrl+B", "Toggle sidebar"),
+        command("toggleChat", "CmdOrCtrl+Shift+C", "Toggle chat"),
         { type: "separator" },
         command("fontBigger", "CmdOrCtrl+=", "Bigger text"),
         command("fontSmaller", "CmdOrCtrl+-", "Smaller text"),

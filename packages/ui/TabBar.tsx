@@ -1,12 +1,14 @@
 import { colors } from "crosswing/colors";
 import { fonts } from "crosswing/fonts";
-import { Plus, RotateCw, X } from "lucide-react";
+import { PanelRight, Plus, RotateCw, X } from "lucide-react";
 import type { Tab, Workspace } from "miks/shared/protocol";
 import { Fragment, HTMLAttributes } from "react";
 import { styled } from "styled-components";
+import { toggleChat } from "./ChatPanel";
 import { closeTab } from "./closing";
 import { daemon } from "./daemon";
 import { useDraggable } from "crosswing/components/draggable/useDraggable";
+import { useSettings } from "./settings";
 import { dropIndex } from "./Sidebar";
 import { tabTitle } from "./status";
 import { StatusDot } from "./StatusDot";
@@ -14,6 +16,8 @@ import { StatusDot } from "./StatusDot";
 const DRAG_GROUP = "tabs";
 
 export function TabBar({ workspace, ...rest }: HTMLAttributes<HTMLDivElement> & { workspace: Workspace }) {
+  const { chatVisible } = useSettings();
+
   // Press and hold a tab to drag it along the bar.
   useDraggable({
     group: DRAG_GROUP,
@@ -42,6 +46,9 @@ export function TabBar({ workspace, ...rest }: HTMLAttributes<HTMLDivElement> & 
         <Plus />
       </button>
       <div className="spacer" />
+      <button className="chat-toggle" title="Chat (⌘⇧C)" data-on={chatVisible} onClick={toggleChat}>
+        <PanelRight />
+      </button>
     </StyledTabBar>
   );
 }
@@ -60,7 +67,8 @@ export const StyledTabBar = styled.div`
     -webkit-app-region: no-drag;
   }
 
-  > .new-tab {
+  > .new-tab,
+  > .chat-toggle {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -79,6 +87,14 @@ export const StyledTabBar = styled.div`
 
     &:hover {
       background: ${colors.buttonBackgroundGlow()};
+      color: ${colors.text()};
+    }
+  }
+
+  > .chat-toggle {
+    margin: 0 2px 0 6px;
+
+    &[data-on="true"] {
       color: ${colors.text()};
     }
   }

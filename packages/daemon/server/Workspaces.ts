@@ -4,8 +4,9 @@ import { EventEmitter } from "events";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { type AgentState, type DaemonState, PROTOCOL_VERSION, type Tab } from "../shared/protocol.ts";
+import { type AgentState, type ChatEntry, type DaemonState, PROTOCOL_VERSION, type Tab } from "../shared/protocol.ts";
 import { Pane } from "./Pane.ts";
+import { Transcript } from "./Transcript.ts";
 
 /** What survives a daemon restart, in `state.json`. */
 /** How long a finished turn waits for its session to end before it's `done`. */
@@ -21,6 +22,9 @@ export type SavedState = {
     tabs: { cwd: string; claudeSessionId?: string; historyId?: string; keep?: string }[];
   }[];
 };
+
+/** Hears a tab's conversation: all of it with `reset`, then what's added. */
+export type ChatListener = (chat: { session: string | null; entries: ChatEntry[]; reset: boolean }) => void;
 
 type WorkspaceRecord = {
   id: string;
@@ -50,6 +54,11 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
   private readonly keeps = new Map<string, { command: string; seenRunning: boolean }>();
   /** A finished turn waits a moment before it's `done` (see applyHook). */
   private readonly pendingDone = new Map<string, NodeJS.Timeout>();
+  /**
+   * The conversation in each tab someone's watching (the chat panel), read
+   * from its Claude session's transcript while there's one.
+   */
+  private readonly chats = new Map<string, { transcript: Transcript | null; listeners: Set<ChatListener> }>();
   /** Each tab's own shell history file's name, kept across restores. */
   private readonly historyIds = new Map<string, string>();
   /** Each tab's shell's directory, as of the last `pollCwds`. */
@@ -304,6 +313,7 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     if (typeof sessionId === "string" && /^[\w-]+$/.test(sessionId)) {
       const transcriptPath = typeof payload?.transcript_path === "string" ? payload.transcript_path : undefined;
       this.claudeSessions.set(tabId, { id: sessionId, transcriptPath });
+      this.updateChat(tabId);
     }
 
     const set = (status: AgentState["status"], message?: string) =>
@@ -335,13 +345,15 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
         set("waiting", payload?.message);
         break;
       case "Stop": {
+        const reply = payload?.last_assistant_message;
+        const replyLines = typeof reply === "string" ? reply.split("\n").length : undefined;
         // A one-shot `claude -p` (a script's, say) ends its session right
         // after its turn, 25ms later in practice; nothing for you to see, so
         // no `done` (and no notification). An interactive session stays.
         const timer = setTimeout(() => {
           this.pendingDone.delete(tabId);
           if (!this.agents.has(tabId)) return;
-          set("done");
+          this.agents.set(tabId, { kind: "claude", status: "done", since: Date.now(), replyLines });
           this.emit("change");
         }, DONE_DELAY);
         timer.unref();
@@ -351,6 +363,7 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
       case "SessionEnd":
         this.agents.delete(tabId);
         this.claudeSessions.delete(tabId);
+        this.updateChat(tabId);
         break;
       default:
         return;
@@ -479,9 +492,59 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     return [shell, "-ilc", `${command}; exec ${shell} -l`];
   }
 
+  /**
+   * Follows a tab's Claude Code conversation, through every session it has
+   * (`/clear` starts another), until the returned function is called.
+   */
+  watchChat(tabId: string, listener: ChatListener): () => void {
+    if (!this.panes.has(tabId)) return () => {};
+
+    let chat = this.chats.get(tabId);
+    if (!chat) {
+      chat = { transcript: null, listeners: new Set() };
+      this.chats.set(tabId, chat);
+      this.updateChat(tabId);
+    }
+    chat.listeners.add(listener);
+    listener({ session: this.chatSession(tabId), entries: chat.transcript?.entries ?? [], reset: true });
+
+    return () => {
+      const current = this.chats.get(tabId);
+      if (!current?.listeners.delete(listener) || current.listeners.size > 0) return;
+      current.transcript?.close();
+      this.chats.delete(tabId);
+    };
+  }
+
+  /** Points a watched tab's conversation at its current session's transcript. */
+  private updateChat(tabId: string) {
+    const chat = this.chats.get(tabId);
+    if (!chat) return;
+
+    const file = this.claudeSessions.get(tabId)?.transcriptPath ?? null;
+    if ((chat.transcript?.file ?? null) === file) return;
+
+    chat.transcript?.close();
+    const transcript = file ? new Transcript(file) : null;
+    chat.transcript = transcript;
+
+    const session = this.chatSession(tabId);
+    const tell = (entries: ChatEntry[], reset: boolean) => {
+      for (const listener of chat.listeners) listener({ session, entries, reset });
+    };
+    transcript?.on("entries", (entries) => tell(entries, false));
+    transcript?.on("reset", () => tell([], true));
+    tell([], true);
+  }
+
+  private chatSession(tabId: string): string | null {
+    return this.chats.get(tabId)?.transcript ? (this.claudeSessions.get(tabId)?.id ?? null) : null;
+  }
+
   /** Ends every pane. For tests; the real daemon just exits. */
   killAll() {
     this.stopping = true;
+    for (const chat of this.chats.values()) chat.transcript?.close();
     for (const timer of this.pendingDone.values()) clearTimeout(timer);
     for (const pane of this.panes.values()) pane.kill();
   }
@@ -508,6 +571,8 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     this.panes.delete(tabId);
     this.agents.delete(tabId);
     this.claudeSessions.delete(tabId);
+    this.chats.get(tabId)?.transcript?.close();
+    this.chats.delete(tabId);
     this.cwds.delete(tabId);
 
     const workspace = this.workspaces.find((w) => w.tabIds.includes(tabId));

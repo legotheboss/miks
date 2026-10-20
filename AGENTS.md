@@ -197,6 +197,23 @@ resizes); keep it passing.
 
 # UI notes
 
+- The chat panel (⌘⇧C, `ui/ChatPanel.tsx`) is another view of the
+  terminal, never its own state. The daemon reads the tab's Claude session
+  transcript (`transcript_path` from the hooks; `server/Transcript.ts`)
+  and sends `chat` messages to whoever watches. The transcript is JSONL with
+  one line per message (and per content block), each written once it's
+  done, so text shows up when a block finishes, not as it streams. The
+  format isn't a documented API, so the parser takes prompts, text and
+  `tool_use` and skips everything else. Files run past 100MB (tool output),
+  so a cheap substring check comes before `JSON.parse`. A 130MB one reads
+  in about 300ms, in chunks, without holding up the event loop. `fs.watchFile`,
+  not `fs.watch`, because a session has its path before the file exists.
+  Sending pastes the message (bracketed, so newlines stay in it) and sends
+  Return 100ms later. The Stop hook's `last_assistant_message` gives
+  `replyLines`, which is how a long reply opens the panel. crosswing's
+  `TextArea` with `autoTrim={false}` never takes a new `value` from outside
+  (it wouldn't clear after sending), so the composer keeps the default.
+
 - Settings (`miks/shared/settings`) live in `settings.json`, owned by the
   Electron main process and pushed to every window; not localStorage, which
   is per origin, so the dev build and Miks.app would each have their own.

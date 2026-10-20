@@ -17,6 +17,9 @@ I enjoyed [cmux](https://github.com/manaflow-ai/cmux) until I realized it bundle
 - Comes back where you left it: layout, each tab's folder and history, and
   its Claude session, resumed. `miks keep <command>` brings back your own
   long-running commands the same way
+- A chat panel (⌘⇧C) beside the terminal: the tab's Claude Code
+  conversation in proportional type with real markdown, and a box to write
+  the next message in. It opens on its own for long replies
 - Follows light and dark mode, and tells Claude Code when it changes
 - Remote windows: a window on another Mac's terminals, over SSH, with
   copying landing on the Mac you're at and dropped files sent over. `miks update` in one updates Miks on that Mac

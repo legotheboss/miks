@@ -153,6 +153,8 @@ export async function serve({
 
     // This connection's viewer for each pane it has attached to.
     const viewers = new Map<string, PaneViewer>();
+    // And the conversations it's watching, by tab.
+    const chats = new Map<string, () => void>();
 
     socket.on("message", (raw) => {
       let message: ClientMessage;
@@ -213,6 +215,19 @@ export async function serve({
           viewers.delete(message.tabId);
           return;
         }
+        case "watchChat": {
+          const { tabId } = message;
+          chats.get(tabId)?.();
+          chats.set(
+            tabId,
+            workspaces.watchChat(tabId, (chat) => send({ type: "chat", tabId, ...chat })),
+          );
+          return;
+        }
+        case "unwatchChat":
+          chats.get(message.tabId)?.();
+          chats.delete(message.tabId);
+          return;
         case "input":
           return workspaces.getPane(message.tabId)?.write(message.data);
         case "clear":
@@ -225,6 +240,7 @@ export async function serve({
     socket.on("close", () => {
       sockets.delete(socket);
       for (const [tabId, viewer] of viewers) workspaces.getPane(tabId)?.detach(viewer);
+      for (const unwatch of chats.values()) unwatch();
       if (stopWhenIdle && sockets.size === 0) onStop?.(false);
     });
   });

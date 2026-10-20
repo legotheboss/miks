@@ -2,7 +2,7 @@
 // exposes as `window.miks` (packages/app/preload.cjs). There's one
 // connection per page; components read state with `useDaemon` and terminals
 // subscribe to their pane's stream with `daemon.stream`.
-import { ClientMessage, DaemonMessage, DaemonState } from "miks/shared/protocol";
+import { ChatEntry, ClientMessage, DaemonMessage, DaemonState } from "miks/shared/protocol";
 import type { Settings } from "miks/shared/settings";
 import { useSyncExternalStore } from "react";
 
@@ -44,6 +44,9 @@ export type DaemonSnapshot = {
   retrying: boolean;
 };
 
+/** A tab's conversation, as `watchChat` hears it. */
+export type ChatEvent = { session: string | null; entries: ChatEntry[]; reset: boolean };
+
 export type PaneStreamEvent =
   | { type: "snapshot"; data: string; cols: number; rows: number }
   | { type: "output"; data: string };
@@ -52,6 +55,7 @@ class DaemonClient {
   private snapshot: DaemonSnapshot = { state: null, connected: false, error: null, retrying: false };
   private readonly listeners = new Set<() => void>();
   private readonly streams = new Map<string, (event: PaneStreamEvent) => void>();
+  private readonly chats = new Map<string, (event: ChatEvent) => void>();
   private readonly connectListeners = new Set<() => void>();
   private readonly commandListeners = new Set<(command: string) => void>();
   private readonly bridge: MiksBridge | undefined = window.miks;
@@ -71,6 +75,7 @@ class DaemonClient {
       this.update({ connected, retrying: false, error: null });
 
       this.send({ type: "hello" });
+      for (const tabId of this.chats.keys()) this.send({ type: "watchChat", tabId });
       for (const listener of this.connectListeners) listener();
     });
 
@@ -97,6 +102,20 @@ class DaemonClient {
     this.streams.set(tabId, handler);
     return () => {
       if (this.streams.get(tabId) === handler) this.streams.delete(tabId);
+    };
+  }
+
+  /**
+   * Follows a tab's Claude Code conversation: all of it first (`reset`), then
+   * what's added, again after every reconnection.
+   */
+  watchChat(tabId: string, handler: (event: ChatEvent) => void): Unsubscribe {
+    this.chats.set(tabId, handler);
+    this.send({ type: "watchChat", tabId });
+    return () => {
+      if (this.chats.get(tabId) !== handler) return;
+      this.chats.delete(tabId);
+      this.send({ type: "unwatchChat", tabId });
     };
   }
 
@@ -140,6 +159,10 @@ class DaemonClient {
       case "output": {
         const { tabId, ...event } = message;
         return this.streams.get(tabId)?.(event);
+      }
+      case "chat": {
+        const { tabId, ...event } = message;
+        return this.chats.get(tabId)?.(event);
       }
     }
   }
