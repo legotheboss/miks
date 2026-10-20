@@ -20,6 +20,9 @@ I enjoyed [cmux](https://github.com/manaflow-ai/cmux) until I realized it bundle
 - A chat panel (⌘⇧C) beside the terminal: the tab's Claude Code
   conversation in proportional type with real markdown, and a box to write
   the next message in. It opens on its own for long replies
+- `miks open <file>` and `miks edit <file>` show a file in that panel, with
+  syntax highlighting and a proper editor; and `$EDITOR` in Miks tabs is
+  that, so git's commit messages and Claude Code's ⌃G open there too
 - Follows light and dark mode, and tells Claude Code when it changes
 - Remote windows: a window on another Mac's terminals, over SSH, with
   copying landing on the Mac you're at and dropped files sent over. `miks update` in one updates Miks on that Mac

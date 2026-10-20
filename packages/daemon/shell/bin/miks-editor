@@ -1,0 +1,5 @@
+#!/bin/sh
+# $EDITOR (and $VISUAL) in Miks's zsh tabs: what git, crontab -e and Claude
+# Code's ⌃G open a file with. It shows in the tab's panel, and this returns
+# once you're done with it there.
+exec "$(dirname "$0")/miks" edit --wait "$@"

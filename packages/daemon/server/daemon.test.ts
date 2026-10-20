@@ -677,6 +677,72 @@ test("the miks keep function in zsh registers the command, quoted, then runs it"
   }
 });
 
+test("miks edit --wait: the file opens in the tab's panel, saves, follows the disk, and returns once closed", async () => {
+  daemon.workspaces.createWorkspace({ cwd: home });
+  const tabId = activeTab(daemon.workspaces.getState());
+  const file = path.join(fs.realpathSync(home), "notes.txt");
+  fs.writeFileSync(path.join(home, ".zshrc"), "PS1='%% '\n");
+
+  // A zsh tab of the daemon's, as far as `miks` can tell.
+  const pane = new Pane({
+    id: "zsh",
+    cwd: home,
+    env: { HOME: home, MIKS_PANE_ID: tabId, MIKS_SOCKET: path.join(home, "miks.sock") },
+    command: ["/bin/zsh", "-l"],
+  });
+  let output = "";
+  pane.attach({ snapshot: () => {}, output: (data) => (output += data) });
+  const client = await connect();
+  try {
+    await waitFor(() => output.includes("\x1b]133;A\x07"));
+    pane.write("[[ $EDITOR == */miks-editor && $VISUAL == $EDITOR ]] && echo EDITOR-$((1+1)); miks open missing.txt\n");
+    await waitFor(() => output.includes("EDITOR-2") && output.includes("no such file: missing.txt"));
+
+    // As git runs it: $EDITOR with a path, relative to where it's run.
+    pane.write("$EDITOR notes.txt; echo DONE-$((1+1))\n");
+    await waitFor(() => daemon.workspaces.getState().workspaces[0].tabs[0].file?.path === file);
+    const opened = daemon.workspaces.getState().workspaces[0].tabs[0].file!;
+    expect(opened).toMatchObject({ edit: true, wait: true });
+
+    // Not there yet: empty, with no mtime, and saving makes it.
+    client.send({ type: "watchFile", tabId });
+    const fresh = await client.next((m) => m.type === "file");
+    expect(fresh).toMatchObject({ id: opened.id, content: "", mtime: null });
+    client.send({ type: "saveFile", tabId, content: "first", mtime: null });
+    const saved = (await client.next((m) => m.type === "fileSaved")) as Extract<DaemonMessage, { type: "fileSaved" }>;
+    expect(fs.readFileSync(file, "utf8")).toBe("first");
+    expect(saved.mtime).toBeTypeOf("number");
+
+    // Changed on disk since: refused, unless forced.
+    fs.writeFileSync(file, "theirs");
+    await waitFor(async () => (await client.files(tabId)).some((m) => m.content === "theirs"));
+    client.send({ type: "saveFile", tabId, content: "mine", mtime: saved.mtime! });
+    await waitFor(async () => (await client.saves(tabId)).some((m) => m.changed));
+    expect(fs.readFileSync(file, "utf8")).toBe("theirs");
+
+    expect(output).not.toContain("DONE-2");
+    client.send({ type: "closeFile", tabId });
+    await waitFor(() => output.includes("DONE-2"));
+    expect(daemon.workspaces.getState().workspaces[0].tabs[0].file).toBeUndefined();
+  } finally {
+    client.close();
+    pane.kill();
+  }
+});
+
+test("the panel won't open what it can't show", async () => {
+  daemon.workspaces.createWorkspace({ cwd: home });
+  const tabId = activeTab(daemon.workspaces.getState());
+  const binary = path.join(home, "image.bin");
+  fs.writeFileSync(binary, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2]));
+  await daemon.workspaces.openFile(tabId, binary, { edit: false, wait: false });
+
+  const client = await connect();
+  client.send({ type: "watchFile", tabId });
+  expect(await client.next((m) => m.type === "file")).toMatchObject({ content: null, problem: "binary" });
+  client.close();
+});
+
 test("programs that set mode 2031 hear when the appearance changes", async () => {
   daemon.workspaces.createWorkspace({ cwd: home });
   const tabId = activeTab(daemon.workspaces.getState());
@@ -919,6 +985,10 @@ async function connect() {
       const message = await until(() => messages.findLast((m) => m.type === "state"));
       return message.state;
     },
+    files: async (tabId: string) =>
+      messages.filter((m) => m.type === "file" && m.tabId === tabId) as Extract<DaemonMessage, { type: "file" }>[],
+    saves: async (tabId: string) =>
+      messages.filter((m) => m.type === "fileSaved" && m.tabId === tabId) as Extract<DaemonMessage, { type: "fileSaved" }>[],
     chats: async (tabId: string) =>
       messages.filter((m) => m.type === "chat" && m.tabId === tabId) as Extract<DaemonMessage, { type: "chat" }>[],
     snapshotMessage: (tabId: string) =>

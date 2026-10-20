@@ -1,0 +1,54 @@
+#!/bin/zsh
+# Miks's `miks open` and `miks edit`, an executable so that any program can
+# run it, not just your shell: `miks edit --wait` is $EDITOR in Miks tabs
+# (see miks-editor). The rest of `miks` (keep, update) is a function in
+# Miks's .zshrc, which hands these here.
+#
+#   miks open <file>           Shows the file in the tab's panel.
+#   miks edit [--wait] <file>  The same, ready to edit; with --wait, returns
+#                              once you're done with it (Done, or closing it).
+
+emulate -L zsh
+
+usage() {
+  print -u2 "Usage: miks open <file>"
+  print -u2 "       miks edit [--wait] <file>"
+  exit 2
+}
+
+mode=$1
+[[ $mode == (open|edit) ]] || usage
+shift
+wait=0
+if [[ $mode == edit && $1 == --wait ]]; then
+  wait=1
+  shift
+fi
+(( $# == 1 )) || usage
+
+if [[ -z $MIKS_PANE_ID || ! -S $MIKS_SOCKET ]]; then
+  print -u2 "miks $mode: only in a Miks tab."
+  exit 1
+fi
+
+file=${1:A}
+if [[ -d $file ]]; then
+  print -u2 "miks $mode: $1 is a folder."
+  exit 1
+fi
+# Editing a file that isn't there yet makes it on saving; just looking at one doesn't.
+if [[ $mode == open && ! -e $file ]]; then
+  print -u2 "miks open: no such file: $1"
+  exit 1
+fi
+
+edit=0
+[[ $mode == edit ]] && edit=1
+query="pane=$MIKS_PANE_ID&edit=$edit&wait=$wait"
+# Waiting has no time limit: it's until you're done.
+limit=(-m 5)
+(( wait )) && limit=()
+if ! print -rn -- "$file" | curl -sf $limit --unix-socket "$MIKS_SOCKET" --data-binary @- "http://miks/api/open?$query" >/dev/null; then
+  print -u2 "miks $mode: Miks didn't answer."
+  exit 1
+fi

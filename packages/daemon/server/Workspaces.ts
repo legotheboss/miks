@@ -4,7 +4,15 @@ import { EventEmitter } from "events";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { type AgentState, type ChatEntry, type DaemonState, PROTOCOL_VERSION, type Tab } from "../shared/protocol.ts";
+import {
+  type AgentState,
+  type ChatEntry,
+  type DaemonState,
+  type OpenFile,
+  PROTOCOL_VERSION,
+  type Tab,
+} from "../shared/protocol.ts";
+import { type FileContents, readForPanel, writeFromPanel } from "./Files.ts";
 import { Pane } from "./Pane.ts";
 import { Transcript } from "./Transcript.ts";
 
@@ -22,6 +30,9 @@ export type SavedState = {
     tabs: { cwd: string; claudeSessionId?: string; historyId?: string; keep?: string }[];
   }[];
 };
+
+/** Hears a tab's open file: as it is now, and again whenever it changes on disk. */
+export type FileListener = (file: FileContents & { id: string }) => void;
 
 /** Hears a tab's conversation: all of it with `reset`, then what's added. */
 export type ChatListener = (chat: { session: string | null; entries: ChatEntry[]; reset: boolean }) => void;
@@ -61,6 +72,14 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
   private readonly chats = new Map<
     string,
     { transcript: Transcript | null; ready: boolean; listeners: Set<ChatListener> }
+  >();
+  /**
+   * The file in each tab's panel (`miks open`, `miks edit`), who's watching
+   * it, and what's waiting for it to close (`miks edit --wait`).
+   */
+  private readonly files = new Map<
+    string,
+    { file: OpenFile; listeners: Set<FileListener>; waiters: Set<() => void>; onDisk?: () => void }
   >();
   /** Each tab's own shell history file's name, kept across restores. */
   private readonly historyIds = new Map<string, string>();
@@ -555,10 +574,100 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     return this.chats.get(tabId)?.transcript ? (this.claudeSessions.get(tabId)?.id ?? null) : null;
   }
 
+  /**
+   * Shows a file in the tab's panel, in place of any it had. With `wait`,
+   * resolves once it's closed (the panel's Done or close, another file
+   * opened over it, or the tab closing); otherwise at once.
+   */
+  openFile(tabId: string, file: string, { edit, wait }: { edit: boolean; wait: boolean }): Promise<void> {
+    if (!this.panes.has(tabId)) return Promise.resolve();
+
+    // Whoever watched the tab's file before watches this one.
+    const listeners = this.files.get(tabId)?.listeners ?? new Set<FileListener>();
+    this.closeFile(tabId, { quietly: true });
+    const open = {
+      file: { id: randomUUID().slice(0, 8), path: file, edit, wait },
+      listeners,
+      waiters: new Set<() => void>(),
+    };
+    this.files.set(tabId, open);
+    this.followFile(tabId, { readNow: true });
+    this.emit("change");
+
+    return wait ? new Promise((resolve) => open.waiters.add(resolve)) : Promise.resolve();
+  }
+
+  /** Follows the tab's open file: as it is now, then each change on disk, until the returned function is called. */
+  watchFile(tabId: string, listener: FileListener): () => void {
+    const open = this.files.get(tabId);
+    if (!open) return () => {};
+
+    open.listeners.add(listener);
+    this.followFile(tabId);
+    void readForPanel(open.file.path).then((contents) => {
+      if (this.files.get(tabId) === open && open.listeners.has(listener)) listener({ id: open.file.id, ...contents });
+    });
+
+    return () => {
+      // Whichever file the tab has by then: watching goes with the tab.
+      const current = this.files.get(tabId);
+      current?.listeners.delete(listener);
+      if (current) this.followFile(tabId);
+    };
+  }
+
+  async saveFile(tabId: string, content: string, mtime: number | null, force?: boolean) {
+    const open = this.files.get(tabId);
+    if (!open) return { error: "The file was closed." };
+    return writeFromPanel(open.file.path, content, mtime, force);
+  }
+
+  /** Closes the tab's file, and lets whatever waited on it go. */
+  closeFile(tabId: string, { quietly = false } = {}) {
+    const open = this.files.get(tabId);
+    if (!open) return;
+
+    if (open.onDisk) fs.unwatchFile(open.file.path, open.onDisk);
+    this.files.delete(tabId);
+    for (const resolve of open.waiters) resolve();
+    if (!quietly) this.emit("change");
+  }
+
+  /**
+   * Watches the open file on disk only while someone here watches it, and
+   * tells them each change. `readNow` for a file just opened over another,
+   * whose watchers have yet to hear it.
+   */
+  private followFile(tabId: string, { readNow = false } = {}) {
+    const open = this.files.get(tabId);
+    if (!open) return;
+
+    const tell = () => {
+      void readForPanel(open.file.path).then((contents) => {
+        if (this.files.get(tabId) !== open) return;
+        for (const listener of open.listeners) listener({ id: open.file.id, ...contents });
+      });
+    };
+
+    if (open.listeners.size === 0) {
+      if (open.onDisk) fs.unwatchFile(open.file.path, open.onDisk);
+      open.onDisk = undefined;
+      return;
+    }
+    if (!open.onDisk) {
+      // watchFile, not watch: editors and git replace files rather than
+      // writing them, which a watch on the old one would miss.
+      open.onDisk = tell;
+      fs.watchFile(open.file.path, { interval: 500, persistent: false }, tell);
+    }
+    if (readNow) tell();
+  }
+
   /** Ends every pane. For tests; the real daemon just exits. */
   killAll() {
     this.stopping = true;
     for (const chat of this.chats.values()) chat.transcript?.close();
+    for (const tabId of [...this.files.keys()]) this.closeFile(tabId, { quietly: true });
     for (const timer of this.pendingDone.values()) clearTimeout(timer);
     for (const pane of this.panes.values()) pane.kill();
   }
@@ -573,6 +682,7 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
       agent: this.agents.get(id) ?? null,
       running: this.panes.get(id)?.running() ?? null,
       kept: this.keeps.has(id) || !!this.resumableSession(id),
+      file: this.files.get(id)?.file,
     };
   }
 
@@ -589,6 +699,7 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     this.claudeSessions.delete(tabId);
     this.chats.get(tabId)?.transcript?.close();
     this.chats.delete(tabId);
+    this.closeFile(tabId);
     this.cwds.delete(tabId);
 
     const workspace = this.workspaces.find((w) => w.tabIds.includes(tabId));

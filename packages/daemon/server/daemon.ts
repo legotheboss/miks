@@ -104,6 +104,20 @@ export async function serve({
       });
     }
 
+    // `miks open` and `miks edit`: the body is the file's absolute path. With
+    // wait=1, answered once the file's closed in the panel (`--wait`).
+    if (req.method === "POST" && url.pathname === "/api/open") {
+      const pane = url.searchParams.get("pane") ?? "";
+      return readText(req).then(async (file) => {
+        if (!workspaces.getPane(pane)) return json(res, 404, { message: "No such tab." });
+        if (!path.isAbsolute(file)) return json(res, 400, { message: "The path must be absolute." });
+        const edit = url.searchParams.get("edit") === "1";
+        const wait = url.searchParams.get("wait") === "1";
+        await workspaces.openFile(pane, file, { edit, wait });
+        json(res, 200, { ok: true });
+      });
+    }
+
     if (req.method === "POST" && url.pathname === "/api/drop") {
       const pane = workspaces.getPane(url.searchParams.get("pane") ?? "");
       const into = url.searchParams.get("into");
@@ -154,8 +168,9 @@ export async function serve({
 
     // This connection's viewer for each pane it has attached to.
     const viewers = new Map<string, PaneViewer>();
-    // And the conversations it's watching, by tab.
+    // And the conversations it's watching, by tab, and the open files.
     const chats = new Map<string, () => void>();
+    const files = new Map<string, () => void>();
 
     const sendPermissions = async () =>
       send({ type: "permissions", app: await permissionsApp(), permissions: await checkPermissions() });
@@ -232,6 +247,26 @@ export async function serve({
           chats.get(message.tabId)?.();
           chats.delete(message.tabId);
           return;
+        case "watchFile": {
+          const { tabId } = message;
+          files.get(tabId)?.();
+          files.set(
+            tabId,
+            workspaces.watchFile(tabId, (file) => send({ type: "file", tabId, ...file })),
+          );
+          return;
+        }
+        case "unwatchFile":
+          files.get(message.tabId)?.();
+          files.delete(message.tabId);
+          return;
+        case "saveFile": {
+          const { tabId, content, mtime, force } = message;
+          void workspaces.saveFile(tabId, content, mtime, force).then((result) => send({ type: "fileSaved", tabId, ...result }));
+          return;
+        }
+        case "closeFile":
+          return workspaces.closeFile(message.tabId);
         case "input":
           return workspaces.getPane(message.tabId)?.write(message.data);
         case "clear":
@@ -249,6 +284,7 @@ export async function serve({
       sockets.delete(socket);
       for (const [tabId, viewer] of viewers) workspaces.getPane(tabId)?.detach(viewer);
       for (const unwatch of chats.values()) unwatch();
+      for (const unwatch of files.values()) unwatch();
       if (stopWhenIdle && sockets.size === 0) onStop?.(false);
     });
   });

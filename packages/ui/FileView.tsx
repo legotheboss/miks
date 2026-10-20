@@ -1,0 +1,387 @@
+import { LanguageDescription } from "@codemirror/language";
+import { languages } from "@codemirror/language-data";
+import { Compartment, EditorState } from "@codemirror/state";
+import { EditorView, keymap } from "@codemirror/view";
+import { basicSetup } from "codemirror";
+import { colors } from "crosswing/colors";
+import { fonts } from "crosswing/fonts";
+import { useMatchMedia } from "crosswing/hooks/useMatchMedia";
+import { ModalContext } from "crosswing/modals/context";
+import { tooltip } from "crosswing/modals/popup";
+import { X } from "lucide-react";
+import type { OpenFile, Tab } from "miks/shared/protocol";
+import { displayPath } from "miks/shared/settings";
+import { use, useEffect, useRef, useState } from "react";
+import { styled } from "styled-components";
+import { daemon, type FileEvent } from "./daemon";
+import { codemirrorDark } from "./highlighting/codemirrorDark";
+import { codemirrorLight } from "./highlighting/codemirrorLight";
+import { getSettings } from "./settings";
+
+/**
+ * The file `miks open` or `miks edit` put in a tab's panel: read-only until
+ * you press Edit (or opened with `miks edit`), saved with ⌘S. The daemon
+ * reads and writes it, so it's the file on the tab's Mac, in a window on
+ * another Mac too. It follows the file on disk; a change there while you
+ * have unsaved ones of your own asks which to keep.
+ */
+export function FileView({ tab, file, focusOnOpen }: { tab: Tab; file: OpenFile; focusOnOpen: boolean }) {
+  const { showToast } = use(ModalContext);
+  const dark = useMatchMedia("(prefers-color-scheme: dark)");
+  const editorRef = useRef<HTMLDivElement>(null);
+  const viewRef = useRef<EditorView | null>(null);
+  const [compartments] = useState(() => ({
+    theme: new Compartment(),
+    language: new Compartment(),
+    editable: new Compartment(),
+  }));
+
+  // What's on disk, as last read or saved: what a save checks it against.
+  const [disk, setDisk] = useState<FileEvent | null>(null);
+  const diskRef = useRef<FileEvent | null>(null);
+  const [editing, setEditing] = useState(file.edit);
+  const [dirty, setDirty] = useState(false);
+  const dirtyRef = useRef(false);
+  // Changed on disk while you had changes of your own.
+  const [conflict, setConflict] = useState<FileEvent | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const name = file.path.split("/").pop() ?? file.path;
+  const folder = file.path.slice(0, file.path.length - name.length - 1);
+  const home = daemon.getSnapshot().state?.home ?? null;
+
+  function markDirty(value: boolean) {
+    dirtyRef.current = value;
+    setDirty(value);
+  }
+
+  function replaceText(text: string) {
+    const view = viewRef.current;
+    if (!view) return;
+    const cursor = Math.min(view.state.selection.main.head, text.length);
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, selection: { anchor: cursor } });
+  }
+
+  // The file as the daemon has it, now and whenever it changes on disk.
+  useEffect(() => {
+    return daemon.watchFile(tab.id, (event) => {
+      if (event.id !== file.id) return;
+      const before = diskRef.current;
+      // What we've seen already (our own save, coming back).
+      if (before && event.mtime === before.mtime) return;
+
+      if (!before || !dirtyRef.current) {
+        diskRef.current = event;
+        setDisk(event);
+        if (before && event.content !== null) replaceText(event.content);
+      } else {
+        setConflict(event);
+      }
+    });
+  }, [tab.id, file.id]);
+
+  // The editor, once there's text to put in it.
+  const ready = disk !== null && disk.content !== null;
+  useEffect(() => {
+    if (!ready || !editorRef.current || !diskRef.current) return;
+
+    const view = new EditorView({
+      parent: editorRef.current,
+      state: EditorState.create({
+        doc: diskRef.current.content ?? "",
+        extensions: [
+          basicSetup,
+          keymap.of([
+            {
+              key: "Mod-s",
+              run: () => {
+                void save();
+                return true;
+              },
+            },
+          ]),
+          compartments.theme.of(dark ? codemirrorDark : codemirrorLight),
+          compartments.language.of([]),
+          compartments.editable.of(editableExtension(editing)),
+          // Unsaved: different from the file as it is on disk.
+          EditorView.updateListener.of((update) => {
+            if (update.docChanged) markDirty(update.state.doc.toString() !== diskRef.current?.content);
+          }),
+        ],
+      }),
+    });
+    viewRef.current = view;
+
+    // Highlighting for the file's language, loaded when it's first needed.
+    const language = LanguageDescription.matchFilename(languages, name);
+    void language?.load().then((support) => {
+      if (viewRef.current === view) view.dispatch({ effects: compartments.language.reconfigure(support) });
+    });
+
+    if (focusOnOpen) view.focus();
+    return () => {
+      view.destroy();
+      viewRef.current = null;
+    };
+  }, [ready, file.id]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: compartments.theme.reconfigure(dark ? codemirrorDark : codemirrorLight) });
+  }, [dark]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: compartments.editable.reconfigure(editableExtension(editing)) });
+    if (editing) viewRef.current?.focus();
+  }, [editing]);
+
+  /** Saves, asking first if it changed on disk since. Resolves with whether it's saved. */
+  async function save(force = false): Promise<boolean> {
+    const view = viewRef.current;
+    if (!view || saving) return false;
+    if (!dirtyRef.current && !force) return true;
+
+    setSaving(true);
+    const content = view.state.doc.toString();
+    const result = await daemon.saveFile(tab.id, content, diskRef.current?.mtime ?? null, force);
+    setSaving(false);
+
+    if (result.changed) {
+      const overwrite = await window.miks?.confirm({
+        message: `${name} changed on disk.`,
+        detail: "Save over it with yours? Its changes will be lost.",
+        button: "Save over it",
+      });
+      return overwrite ? save(true) : false;
+    }
+    if (result.error || result.mtime === undefined) {
+      showToast({ title: `Couldn't save ${name}`, message: result.error, destructive: true });
+      return false;
+    }
+
+    const saved = { id: file.id, content, mtime: result.mtime };
+    diskRef.current = saved;
+    setDisk(saved);
+    setConflict(null);
+    // Typing while it saved isn't saved.
+    markDirty(view.state.doc.toString() !== content);
+    return true;
+  }
+
+  async function close() {
+    if (dirtyRef.current) {
+      const discard = await window.miks?.confirm({
+        message: `Close ${name} without saving?`,
+        detail: "Your changes will be lost.",
+        button: "Don't save",
+      });
+      if (!discard) return;
+    }
+    daemon.send({ type: "closeFile", tabId: tab.id });
+  }
+
+  // `--wait` (as $EDITOR): saved, closed, and whatever waited goes on.
+  async function done() {
+    if (await save()) daemon.send({ type: "closeFile", tabId: tab.id });
+  }
+
+  function resolveConflict(take: "disk" | "mine") {
+    if (!conflict) return;
+    diskRef.current = conflict;
+    setDisk(conflict);
+    if (take === "disk" && conflict.content !== null) replaceText(conflict.content);
+    // Keeping yours: still unsaved, and saving goes over the file's.
+    else markDirty(true);
+    setConflict(null);
+  }
+
+  const problem =
+    disk?.problem === "binary"
+      ? "This isn't a text file."
+      : disk?.problem === "large"
+        ? "This file is too big to open here (over 5 MB)."
+        : disk?.problem === "unreadable"
+          ? "This file can't be read."
+          : null;
+
+  return (
+    <StyledFileView>
+      <div className="header">
+        <div className="name" title={file.path}>
+          <span className="file">
+            {name}
+            {dirty && <span className="dirty" {...tooltip("Not saved", { delay: true })} />}
+          </span>
+          <span className="folder">{displayPath(folder || "/", getSettings().hidePathPrefix, home)}</span>
+        </div>
+        {ready && !editing && (
+          <button className="action" onClick={() => setEditing(true)}>
+            Edit
+          </button>
+        )}
+        {ready && editing && !file.wait && (
+          <button className="action" disabled={!dirty || saving} onClick={() => void save()} {...tooltip("Save", { hotkey: "cmd+s", delay: true })}>
+            Save
+          </button>
+        )}
+        {file.wait && (
+          <button className="action primary" disabled={saving} onClick={() => void done()} {...tooltip("Save and close, and let what's waiting go on", { delay: true })}>
+            Done
+          </button>
+        )}
+        <button className="close" onClick={() => void close()} {...tooltip("Close", { delay: true })}>
+          <X size={15} />
+        </button>
+      </div>
+      {conflict && (
+        <div className="conflict">
+          <span>{name} changed on disk.</span>
+          <button onClick={() => resolveConflict("disk")}>Use the file's</button>
+          <button onClick={() => resolveConflict("mine")}>Keep mine</button>
+        </div>
+      )}
+      {problem ? <div className="note">{problem}</div> : <div className="editor" ref={editorRef} />}
+    </StyledFileView>
+  );
+}
+
+const editableExtension = (editing: boolean) => [EditorView.editable.of(editing), EditorState.readOnly.of(!editing)];
+
+const StyledFileView = styled.div`
+  flex-grow: 1;
+  min-height: 0;
+  display: flex;
+  flex-flow: column;
+
+  > .header {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px 8px 16px;
+    border-bottom: 1px solid ${colors.separator()};
+
+    > .name {
+      flex-grow: 1;
+      min-width: 0;
+      display: flex;
+      flex-flow: column;
+
+      > .file {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font: ${fonts.displayBold({ size: 13, line: "18px" })};
+
+        > .dirty {
+          flex-shrink: 0;
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          background: ${colors.textSecondary()};
+        }
+      }
+
+      > .folder {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: ${colors.textSecondary()};
+        font: ${fonts.display({ size: 11, line: "15px" })};
+      }
+    }
+
+    > .action {
+      flex-shrink: 0;
+      height: 26px;
+      padding: 0 12px;
+      border-radius: 13px;
+      border: 1px solid ${colors.separator()};
+      background: ${colors.textBackground()};
+      color: ${colors.text()};
+      font: ${fonts.displayMedium({ size: 12, line: "16px" })};
+      cursor: pointer;
+
+      &:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+
+      &.primary {
+        border-color: transparent;
+        background: #5b4fd1;
+        color: #fff;
+      }
+    }
+
+    > .close {
+      flex-shrink: 0;
+      width: 26px;
+      height: 26px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: none;
+      border-radius: 7px;
+      background: transparent;
+      color: ${colors.textSecondary()};
+      cursor: pointer;
+
+      &:hover {
+        background: ${colors.buttonBackgroundGlow()};
+        color: ${colors.text()};
+      }
+    }
+  }
+
+  > .conflict {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px;
+    background: ${colors.yellow({ alpha: 0.2 })};
+    border-bottom: 1px solid ${colors.separator()};
+    font: ${fonts.display({ size: 12, line: "16px" })};
+
+    > span {
+      flex-grow: 1;
+    }
+
+    > button {
+      border: none;
+      background: none;
+      color: inherit;
+      font: ${fonts.displayBold({ size: 12, line: "16px" })};
+      cursor: pointer;
+    }
+  }
+
+  > .note {
+    padding: 24px;
+    color: ${colors.textSecondary()};
+    text-align: center;
+  }
+
+  > .editor {
+    flex-grow: 1;
+    min-height: 0;
+    display: flex;
+
+    > .cm-editor {
+      flex-grow: 1;
+      min-width: 0;
+      font: ${fonts.displayMono({ size: 12.5, line: "19px" })};
+
+      &.cm-focused {
+        outline: none;
+      }
+
+      .cm-scroller {
+        font: inherit;
+      }
+    }
+  }
+`;

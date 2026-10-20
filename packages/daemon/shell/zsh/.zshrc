@@ -12,6 +12,12 @@ ZDOTDIR=$__miks_zdotdir
 # because macOS's path_helper puts /usr/bin back in front of anything before.
 path=("${__miks_zdotdir:h}/bin" $path)
 
+# Files that programs open for you to edit (git's commit messages, crontab
+# -e, Claude Code's ⌃G) open in the tab's panel, and the program goes on once
+# you're done there. After your startup files, so it's this in Miks tabs.
+export EDITOR="${__miks_zdotdir:h}/bin/miks-editor"
+export VISUAL=$EDITOR
+
 # This tab's own history (MIKS_HISTORY, kept by the daemon across restarts):
 # each command it runs, written as it runs in zsh's history format, then read
 # back last when the tab returns, so ↑ starts with what this tab was doing.
@@ -45,9 +51,13 @@ miks() {
   case $1 in
     keep) shift; __miks_keep "$@" ;;
     update) __miks_update ;;
+    # An executable (../bin/miks), so programs other than your shell can too.
+    open|edit) command miks "$@" ;;
     *)
       builtin print -u2 "Usage: miks keep <command> [arguments...]"
       builtin print -u2 "       miks update"
+      builtin print -u2 "       miks open <file>"
+      builtin print -u2 "       miks edit [--wait] <file>"
       return 2
       ;;
   esac

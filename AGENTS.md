@@ -259,6 +259,21 @@ resizes); keep it passing.
   `MIKS_BACKGROUND` tests) gets no focus events at all, so test focus with
   CDP's `Emulation.setFocusEmulationEnabled`.
 
+- `miks open <file>` and `miks edit [--wait] <file>` show a file in the
+  tab's panel (`ui/FileView.tsx`, CodeMirror 6 with `@codemirror/language-data`
+  loading each language as needed; chatwing's GitHub themes in
+  `ui/highlighting`). They're `shell/bin/miks`, an executable rather than the
+  `.zshrc` function (which hands them over), so programs can run them:
+  `$EDITOR`/`$VISUAL` in Miks's zsh is `shell/bin/miks-editor`
+  (`miks edit --wait`), for git, `crontab -e` and Claude Code's ⌃G. It's
+  `POST /api/open` (the path as the body); with `wait=1` the request stays
+  open until the file closes (Done, ✕, another file over it, the tab
+  closing). The daemon reads, watches (`fs.watchFile`: git and editors
+  replace files) and saves it, so a remote window edits that Mac's file. A
+  save is refused if the file's mtime moved since the editor's copy, unless
+  forced (`saveFile`); the editor then asks. In a Claude tab the panel
+  switches Chat | file, both kept mounted (CSS hides one).
+
 - Settings (`miks/shared/settings`) live in `settings.json`, owned by the
   Electron main process and pushed to every window; not localStorage, which
   is per origin, so the dev build and Miks.app would each have their own.

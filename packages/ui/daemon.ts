@@ -49,6 +49,10 @@ export type DaemonSnapshot = {
 /** How the daemon's Mac lets its terminals' programs at things, as `permissions` hears it. */
 export type PermissionsEvent = { app: string | null; permissions: Permission[] };
 
+/** A tab's open file, as `watchFile` hears it. */
+export type FileEvent = Omit<Extract<DaemonMessage, { type: "file" }>, "type" | "tabId">;
+export type SaveResult = Omit<Extract<DaemonMessage, { type: "fileSaved" }>, "type" | "tabId">;
+
 /** A tab's conversation, as `watchChat` hears it. */
 export type ChatEvent = { session: string | null; entries: ChatEntry[]; reset: boolean };
 
@@ -61,6 +65,8 @@ class DaemonClient {
   private readonly listeners = new Set<() => void>();
   private readonly streams = new Map<string, (event: PaneStreamEvent) => void>();
   private readonly chats = new Map<string, (event: ChatEvent) => void>();
+  private readonly files = new Map<string, (event: FileEvent) => void>();
+  private readonly saves = new Map<string, (result: SaveResult) => void>();
   private readonly connectListeners = new Set<() => void>();
   private readonly commandListeners = new Set<(command: string) => void>();
   private readonly permissionListeners = new Set<(event: PermissionsEvent) => void>();
@@ -82,6 +88,7 @@ class DaemonClient {
 
       this.send({ type: "hello" });
       for (const tabId of this.chats.keys()) this.send({ type: "watchChat", tabId });
+      for (const tabId of this.files.keys()) this.send({ type: "watchFile", tabId });
       for (const listener of this.connectListeners) listener();
     });
 
@@ -131,6 +138,26 @@ class DaemonClient {
     return () => this.permissionListeners.delete(listener);
   }
 
+  /** Follows a tab's open file: as it is now, then again whenever it changes on disk. */
+  watchFile(tabId: string, handler: (event: FileEvent) => void): Unsubscribe {
+    this.files.set(tabId, handler);
+    this.send({ type: "watchFile", tabId });
+    return () => {
+      if (this.files.get(tabId) !== handler) return;
+      this.files.delete(tabId);
+      this.send({ type: "unwatchFile", tabId });
+    };
+  }
+
+  /** Saves a tab's open file; see `saveFile` in the protocol. One at a time per tab. */
+  saveFile(tabId: string, content: string, mtime: number | null, force = false): Promise<SaveResult> {
+    if (!this.snapshot.connected) return Promise.resolve({ error: "Not connected to the daemon." });
+    return new Promise((resolve) => {
+      this.saves.set(tabId, resolve);
+      this.send({ type: "saveFile", tabId, content, mtime, force });
+    });
+  }
+
   /** Called on every (re)connection, which is when terminals must attach. */
   onConnect(listener: () => void): Unsubscribe {
     this.connectListeners.add(listener);
@@ -175,6 +202,16 @@ class DaemonClient {
       case "chat": {
         const { tabId, ...event } = message;
         return this.chats.get(tabId)?.(event);
+      }
+      case "file": {
+        const { tabId, ...event } = message;
+        return this.files.get(tabId)?.(event);
+      }
+      case "fileSaved": {
+        const { tabId, ...result } = message;
+        this.saves.get(tabId)?.(result);
+        this.saves.delete(tabId);
+        return;
       }
       case "permissions": {
         const { type: _type, ...event } = message;

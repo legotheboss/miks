@@ -23,6 +23,7 @@ import {
 } from "react";
 import { styled } from "styled-components";
 import { daemon } from "./daemon";
+import { FileView } from "./FileView";
 import { renderMarkdown } from "./markdown";
 import { useSettings } from "./settings";
 import {
@@ -142,7 +143,15 @@ export function ChatLayout({
   supported: boolean;
   children: ReactNode;
 }) {
-  const visible = useChatOpen(tab) && !!tab.agent;
+  const chatShown = useChatOpen(tab) && !!tab.agent;
+  const file = tab.file;
+  // A file opening (or opened again) comes to the front; Chat | file switches.
+  const [view, setView] = useState<"chat" | "file">("file");
+  useEffect(() => {
+    if (file) setView("file");
+  }, [file?.id]);
+  const showing = file && (view === "file" || !chatShown) ? "file" : "chat";
+  const visible = chatShown || !!file;
   const ref = useRef<HTMLDivElement>(null);
 
   // Coming back to the tab, the keyboard goes back where it was: into the
@@ -150,7 +159,7 @@ export function ChatLayout({
   // terminal. Where it was is read first (layout effects run before the
   // rest), because the terminal takes the keyboard as it comes on screen,
   // which would record that instead; this puts it back after.
-  const returnTo = useRef<"composer" | "conversation" | undefined>(undefined);
+  const returnTo = useRef<PanelPlace | undefined>(undefined);
   useLayoutEffect(() => {
     returnTo.current = active ? panelFocus.get(tab.id) : undefined;
   }, [active]);
@@ -169,7 +178,13 @@ export function ChatLayout({
       ref={ref}
       onFocus={(event) => {
         const target = event.target as HTMLElement;
-        const where = target.closest(".composer") ? "composer" : target.closest(".scroller") ? "conversation" : null;
+        const where = target.closest(".file-view")
+          ? "file"
+          : target.closest(".composer")
+            ? "composer"
+            : target.closest(".scroller")
+              ? "conversation"
+              : null;
         if (where) panelFocus.set(tab.id, where);
         else panelFocus.delete(tab.id);
       }}
@@ -178,6 +193,8 @@ export function ChatLayout({
         edge="right"
         mode="auto"
         panelVisible={visible}
+        // A click on the shaded terminal (overlay mode): the chat goes, but
+        // a file stays until it's closed, being something you may not have saved.
         onPanelVisibleChange={(open) => {
           setChatOpen(tab, open);
           if (!open) focusActiveTerminal();
@@ -192,19 +209,45 @@ export function ChatLayout({
         restorationKey={ChatPanel}
       >
         <TerminalArea active={active}>{children}</TerminalArea>
-        <ChatPanel tab={tab} visible={visible} supported={supported} />
+        <ChatPanel
+          tab={tab}
+          visible={visible}
+          supported={supported}
+          showing={showing}
+          onShow={(next) => {
+            if (next === "chat") setChatOpen(tab, true);
+            setView(next);
+          }}
+          focusFile={active}
+        />
       </PanelLayout>
     </StyledChatLayout>
   );
 }
 
-/** Where in its panel each tab had the keyboard last, if it was there. */
-const panelFocus = new Map<string, "composer" | "conversation">();
+/** Where in a tab's panel the keyboard can be. */
+type PanelPlace = "composer" | "conversation" | "file";
 
-/** The composer, unless it's disabled (no session yet): then the conversation. */
-function focusPanel(root: HTMLElement, where: "composer" | "conversation") {
-  const composer = root.querySelector<HTMLTextAreaElement>(".composer textarea");
-  const target = where === "composer" && composer && !composer.disabled ? composer : root.querySelector<HTMLElement>(".scroller");
+/** Where in its panel each tab had the keyboard last, if it was there. */
+const panelFocus = new Map<string, PanelPlace>();
+
+/**
+ * Puts the keyboard there, if that's on show, or else whatever the panel is
+ * showing: the file's editor, or the composer (unless it's disabled, with
+ * no session yet: then the conversation).
+ */
+function focusPanel(root: HTMLElement, where: PanelPlace) {
+  const shown = <T extends HTMLElement>(element: T | null) => (element?.offsetParent ? element : null);
+  const editor = shown(root.querySelector<HTMLElement>(".file-view .cm-content"));
+  const composer = shown(root.querySelector<HTMLTextAreaElement>(".composer textarea"));
+  const conversation = shown(root.querySelector<HTMLElement>(".scroller"));
+  const usable = composer && !composer.disabled ? composer : null;
+  const target =
+    where === "file"
+      ? (editor ?? usable ?? conversation)
+      : where === "conversation"
+        ? (conversation ?? editor)
+        : (usable ?? editor ?? conversation);
   target?.focus({ preventScroll: true });
 }
 
@@ -269,17 +312,48 @@ const StyledChatLayout = styled.div`
  * sent from here is typed into the terminal, so the terminal stays the
  * truth: this is another view of it.
  */
-export function ChatPanel({ tab, visible, supported }: { tab: Tab; visible: boolean; supported: boolean }) {
+export function ChatPanel({
+  tab,
+  visible,
+  supported,
+  showing,
+  onShow,
+  focusFile,
+}: {
+  tab: Tab;
+  visible: boolean;
+  supported: boolean;
+  /** The conversation or the tab's file; both stay put while the other shows. */
+  showing: "chat" | "file";
+  onShow: (showing: "chat" | "file") => void;
+  /** Whether the file's editor takes the keyboard as it opens (`miks edit`). */
+  focusFile: boolean;
+}) {
   const { fontSize } = useSettings();
+  const fileName = tab.file?.path.split("/").pop();
 
   return (
     // Its text grows and shrinks with the terminal's (⌘= and ⌘-), through
     // the font scale crosswing's fonts all follow.
-    <StyledChatPanel style={{ "--font-scale": fontSize / DEFAULT_SETTINGS.fontSize } as CSSProperties}>
-      {supported ? (
-        <Conversation tab={tab} visible={visible} />
-      ) : (
+    <StyledChatPanel data-showing={showing} style={{ "--font-scale": fontSize / DEFAULT_SETTINGS.fontSize } as CSSProperties}>
+      {tab.file && tab.agent && (
+        <div className="switcher">
+          <button data-on={showing === "chat"} onClick={() => onShow("chat")}>
+            Chat
+          </button>
+          <button data-on={showing === "file"} onClick={() => onShow("file")}>
+            {fileName}
+          </button>
+        </div>
+      )}
+      {tab.agent && supported && <Conversation tab={tab} visible={visible} />}
+      {tab.agent && !supported && (
         <div className="note">This tab's Mac has an older Miks. Update it there to see conversations here.</div>
+      )}
+      {tab.file && (
+        <div className="file-view">
+          <FileView key={tab.file.id} tab={tab} file={tab.file} focusOnOpen={focusFile && tab.file.edit} />
+        </div>
       )}
     </StyledChatPanel>
   );
@@ -697,6 +771,49 @@ const StyledChatPanel = styled.div`
   background: ${colors.textBackgroundPanel()};
   color: ${colors.text()};
   font: ${fonts.display({ size: 14, line: "23px" })};
+
+  /* Whichever isn't showing stays, hidden, so it's as you left it. */
+  &[data-showing="file"] > .scroller,
+  &[data-showing="file"] > .composer,
+  &[data-showing="file"] > .note,
+  &[data-showing="chat"] > .file-view {
+    display: none;
+  }
+
+  > .file-view {
+    flex-grow: 1;
+    min-height: 0;
+    display: flex;
+    flex-flow: column;
+  }
+
+  > .switcher {
+    flex-shrink: 0;
+    display: flex;
+    gap: 4px;
+    padding: 8px 12px 0;
+
+    > button {
+      min-width: 0;
+      max-width: 60%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      height: 26px;
+      padding: 0 12px;
+      border: none;
+      border-radius: 13px;
+      background: transparent;
+      color: ${colors.textSecondary()};
+      font: ${fonts.displayMedium({ size: 12, line: "16px" })};
+      cursor: pointer;
+
+      &[data-on="true"] {
+        background: ${colors.buttonBackgroundGlow()};
+        color: ${colors.text()};
+      }
+    }
+  }
 
   > .note,
   > .scroller > .note {

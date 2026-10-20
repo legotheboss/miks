@@ -6,7 +6,7 @@
  * Bumped when a message changes shape or appears, so a UI talking to another
  * Mac's daemon can tell it's a different Miks. Before 2 there was none.
  */
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 
 /**
  * What a coding agent in a pane is up to, as reported by its hooks.
@@ -61,7 +61,24 @@ export type Tab = {
   running?: string | null;
   /** Whether a restore brings back what's running (`miks keep`, or a Claude session). Since protocol 3. */
   kept?: boolean;
+  /** A file shown in the tab's panel (`miks open`, `miks edit`). Since protocol 8. */
+  file?: OpenFile;
 };
+
+/** A file `miks open` or `miks edit` put in a tab's panel. */
+export type OpenFile = {
+  /** This opening of it: opening it again is another. */
+  id: string;
+  /** Absolute, on the daemon's Mac. */
+  path: string;
+  /** Opened for editing (`miks edit`), not just to read. */
+  edit: boolean;
+  /** Something's waiting for it to close (`miks edit --wait`, as $EDITOR). */
+  wait: boolean;
+};
+
+/** Why a file's contents aren't there to show. */
+export type FileProblem = "binary" | "large" | "unreadable";
 
 export type Workspace = {
   id: string;
@@ -151,7 +168,21 @@ export type ClientMessage =
    * Asks macOS for one, in a dialog on the daemon's Mac, or opens its pane in
    * System Settings there; `permissions` follows as it changes. Since protocol 7.
    */
-  | { type: "requestPermission"; id: string };
+  | { type: "requestPermission"; id: string }
+  /**
+   * Starts sending the tab's open file: a `file` now, and another whenever
+   * it changes on disk. Since protocol 8.
+   */
+  | { type: "watchFile"; tabId: string }
+  | { type: "unwatchFile"; tabId: string }
+  /**
+   * Writes the tab's open file; answered by `fileSaved`. Refused if it changed
+   * on disk since `mtime` (what the editor last read or saved; null for a new
+   * file), unless `force`.
+   */
+  | { type: "saveFile"; tabId: string; content: string; mtime: number | null; force?: boolean }
+  /** Closes the tab's file, letting a `miks edit --wait` go. */
+  | { type: "closeFile"; tabId: string };
 
 //
 // Daemon → client.
@@ -169,6 +200,14 @@ export type DaemonMessage =
    */
   | { type: "chat"; tabId: string; session: string | null; entries: ChatEntry[]; reset: boolean }
   /** `app` is what macOS calls the daemon in its dialogs ("Miks Helper"), if anything. */
-  | { type: "permissions"; app: string | null; permissions: Permission[] };
+  | { type: "permissions"; app: string | null; permissions: Permission[] }
+  /**
+   * The tab's open file as it is on disk: its text, or why there's none to
+   * show. A file not there yet (`miks edit` of a new one) is empty, with no
+   * `mtime`.
+   */
+  | { type: "file"; tabId: string; id: string; content: string | null; mtime: number | null; problem?: FileProblem }
+  /** How a `saveFile` went: saved (its new `mtime`), or changed on disk since, or an error. */
+  | { type: "fileSaved"; tabId: string; mtime?: number; changed?: boolean; error?: string };
 
 // A pane whose program exits simply disappears from the next `state`.
