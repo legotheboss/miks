@@ -56,7 +56,15 @@ const drafts = {
 };
 
 /** Whether a prompt in the transcript is one sent from here, however its whitespace came out. */
-const sameText = (a: string, b: string) => a.replace(/\s+/g, " ").trim() === b.replace(/\s+/g, " ").trim();
+/**
+ * Whether a prompt in the transcript is one sent from here, however its
+ * whitespace came out. Contains, not equals: what was already in Claude's
+ * prompt goes in front of it, like an image pasted with ⌃V ("[Image #1]").
+ */
+const sentAs = (prompt: string, sent: string) => {
+  const squash = (text: string) => text.replace(/\s+/g, " ").trim();
+  return squash(prompt).includes(squash(sent));
+};
 
 /**
  * Which tabs have their panel open: each tab's own, like its terminal, and
@@ -337,7 +345,7 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
       if (prompts.length === 0) return;
       setPending((current) =>
         current.filter(
-          (sent) => !prompts.some((prompt) => prompt.time >= sent.time - 5000 && sameText(prompt.text, sent.text)),
+          (sent) => !prompts.some((prompt) => prompt.time >= sent.time - 5000 && sentAs(prompt.text, sent.text)),
         ),
       );
     });
@@ -397,11 +405,23 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
     atBottom.current = true;
   }
 
+  // ⌃V is Claude Code's own paste, of an image on the clipboard: it reads
+  // the clipboard itself, so the keystroke goes to the terminal, and the
+  // image to Claude's prompt, ahead of what you send from here. (It's this
+  // Mac's clipboard Claude reads, so not for a window on another Mac.)
+  function pasteImage() {
+    daemon.send({ type: "input", tabId: tab.id, data: "\x16" });
+    showToast({ title: "Pasted into Claude's prompt", message: "An image on the clipboard goes in with your message." });
+  }
+
   // Return is always a newline; ⌘Return sends.
   function onKeyDown(event: KeyboardEvent) {
     if (event.key === "Enter" && event.metaKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       send();
+    } else if (event.key === "v" && event.ctrlKey && !event.metaKey && !event.altKey) {
+      event.preventDefault();
+      pasteImage();
     } else if (event.key === "Escape") {
       event.preventDefault();
       leave();
@@ -508,6 +528,9 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
           if (event.key === "/" && plain) {
             event.preventDefault();
             focusComposer();
+          } else if (event.key === "v" && event.ctrlKey && !event.metaKey && !event.altKey) {
+            event.preventDefault();
+            pasteImage();
           } else if ((event.key === "ArrowUp" || event.key === "ArrowDown") && plain) {
             event.preventDefault();
             jump(event.key === "ArrowUp" ? -1 : 1);
