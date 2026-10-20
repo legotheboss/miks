@@ -11,8 +11,29 @@ import { renderMarkdown } from "./markdown";
 import { getSettings, updateSettings } from "./settings";
 import { droppedText, focusActiveTerminal, onDragOver, sendEscape, sendToTerminal } from "./TerminalView";
 
-/** What you've started writing in each tab, kept while you look at others. */
-const drafts = new Map<string, string>();
+/**
+ * What you've started writing in each tab, kept while you look at others and
+ * across relaunches. In this window's storage: a draft is this Mac's, and
+ * lost if it can't be kept, nothing worse. A restored tab is a new one.
+ */
+const drafts = {
+  get(tabId: string): string {
+    try {
+      return localStorage.getItem(`ChatPanel:draft:${tabId}`) ?? "";
+    } catch {
+      return "";
+    }
+  },
+  set(tabId: string, text: string) {
+    try {
+      if (text) localStorage.setItem(`ChatPanel:draft:${tabId}`, text);
+      else localStorage.removeItem(`ChatPanel:draft:${tabId}`);
+    } catch {}
+  },
+};
+
+/** Whether a prompt in the transcript is one sent from here, however its whitespace came out. */
+const sameText = (a: string, b: string) => a.replace(/\s+/g, " ").trim() === b.replace(/\s+/g, " ").trim();
 
 /** Set when you open the panel yourself: the composer takes the keyboard. */
 let focusOnShow = false;
@@ -68,7 +89,9 @@ const MAX_ENTRIES = 2000;
 
 function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
   const [chat, setChat] = useState<{ session: string | null; entries: ChatEntry[] } | null>(null);
-  const [text, setText] = useState(drafts.get(tab.id) ?? "");
+  const [text, setText] = useState(drafts.get(tab.id));
+  // Sent from here and not yet in the transcript: shown right away, faded.
+  const [pending, setPending] = useState<{ id: string; text: string; time: number }[]>([]);
   const [quote, setQuote] = useState<{ text: string; top: number; left: number } | null>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const textAreaRef = useRef<TextAreaRef>(null);
@@ -78,12 +101,21 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
   // Only while it's showing; a hidden panel needn't follow anything.
   useEffect(() => {
     if (!visible) return;
-    return daemon.watchChat(tab.id, (event) =>
+    return daemon.watchChat(tab.id, (event) => {
       setChat((current) => ({
         session: event.session,
         entries: event.reset ? event.entries : [...(current?.entries ?? []), ...event.entries].slice(-MAX_ENTRIES),
-      })),
-    );
+      }));
+      // Once Claude Code has it, it's the transcript's to show. (Only since
+      // it was sent: you may well have said "yes" before.)
+      const prompts = event.entries.filter((entry) => entry.kind === "prompt");
+      if (prompts.length === 0) return;
+      setPending((current) =>
+        current.filter(
+          (sent) => !prompts.some((prompt) => prompt.time >= sent.time - 5000 && sameText(prompt.text, sent.text)),
+        ),
+      );
+    });
   }, [tab.id, visible]);
 
   useEffect(() => {
@@ -96,12 +128,11 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
   useLayoutEffect(() => {
     const scroller = scrollerRef.current;
     if (scroller && atBottom.current) scroller.scrollTop = scroller.scrollHeight;
-  }, [chat]);
+  }, [chat, pending]);
 
   function changeText(next: string) {
     setText(next);
-    if (next) drafts.set(tab.id, next);
-    else drafts.delete(tab.id);
+    drafts.set(tab.id, next);
   }
 
   function insert(addition: string) {
@@ -119,6 +150,7 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
   function send() {
     if (!canSend) return;
     sendToTerminal(tab.id, text.trim());
+    setPending([...pending, { id: crypto.randomUUID(), text: text.trim(), time: Date.now() }]);
     changeText("");
     atBottom.current = true;
   }
@@ -223,6 +255,11 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
             <Reply key={item.entry.id} text={item.entry.text} />
           ),
         )}
+        {pending.map((sent) => (
+          <div key={sent.id} className="prompt" data-pending>
+            <div className="bubble">{sent.text}</div>
+          </div>
+        ))}
         {session && status === "working" && <div className="working">Working…</div>}
         {quote && (
           <button
@@ -360,12 +397,21 @@ const StyledChatPanel = styled.div`
       justify-content: flex-end;
       padding-left: 36px;
 
+      &[data-pending] {
+        opacity: 0.55;
+      }
+
       > .bubble {
         white-space: pre-wrap;
         overflow-wrap: anywhere;
         padding: 8px 12px;
         border-radius: 14px;
-        background: ${colors.textBackgroundAlt()};
+        background: ${colors.darkBlue()};
+        color: ${colors.white()};
+
+        ::selection {
+          background: ${colors.white({ alpha: 0.35 })};
+        }
       }
     }
 

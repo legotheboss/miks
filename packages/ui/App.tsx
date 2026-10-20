@@ -106,14 +106,15 @@ export function App() {
           <PanelLayout
             className="chat-layout"
             edge="right"
-            // Beside the terminal, so you can read here and watch it there.
-            mode="shrink"
+            // Beside the terminal, so you can read here and watch it there,
+            // until that would leave the terminal too narrow: then over it.
+            mode="auto"
             panelVisible={chatVisible}
             onPanelVisibleChange={(visible) => updateSettings({ chatVisible: visible })}
             panelDefaultSize={420}
             panelMinSize={300}
             panelMaxSize={900}
-            contentMinSize={320}
+            contentMinSize={600}
             hotkey={null}
             hideToolbarButton
             hideDragHandle
