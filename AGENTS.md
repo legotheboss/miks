@@ -89,6 +89,11 @@ Never SIGTERM a Miks UI; that's an ordinary quit.
   `POST /api/drop` (through the tunnel, for a remote). ⌥ because it's
   Finder's copy modifier; ⌘ (move, to Finder) didn't work from Finder.
   `scripts/devtools.ts drop [--alt] <file>...` drops real files, as from Finder.
+  ⌃V, Claude Code's paste of a clipboard image, reads the clipboard of the
+  Mac Claude runs on, so in a remote window (terminal or chat panel) main
+  sends this Mac's image over the same way (`miks:sendClipboardImage`) and
+  types its path. Electron 44's `clipboard` is the async web-style API
+  (`read()`, items by MIME type): there's no `readImage` any more.
   Focusing a window re-sends its size and appearance, so the Mac you're at
   wins. Open remote windows reopen at launch (`UI/remote-windows.json`).
   `PROTOCOL_VERSION` warns when two Miks disagree. A Mac's Miks quitting
