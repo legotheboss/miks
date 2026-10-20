@@ -233,11 +233,12 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
     });
   }, [tab.id, visible]);
 
+  // Once there's a session: until then the field is disabled, and won't take it.
   useEffect(() => {
-    if (!visible || !focusOnShow) return;
+    if (!visible || !chat?.session || !focusOnShow) return;
     focusOnShow = false;
     focusComposer();
-  }, [visible]);
+  }, [visible, chat?.session]);
 
   // New messages keep it at the bottom, unless you've scrolled up to read.
   useLayoutEffect(() => {
@@ -356,6 +357,18 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
         onScroll={(event) => {
           const scroller = event.currentTarget;
           atBottom.current = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40;
+        }}
+        // Focusable, so a click in the conversation puts the keyboard here,
+        // where / goes to the composer and Escape back to the terminal.
+        tabIndex={-1}
+        onKeyDown={(event) => {
+          if (event.key === "/" && !event.metaKey && !event.ctrlKey && !event.altKey) {
+            event.preventDefault();
+            focusComposer();
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            focusActiveTerminal();
+          }
         }}
         onMouseUp={onMouseUp}
         onMouseDown={() => setQuote(null)}
@@ -503,6 +516,7 @@ const StyledChatPanel = styled.div`
 
   > .scroller {
     flex-grow: 1;
+    outline: none;
     min-height: 0;
     overflow-y: auto;
     position: relative;
