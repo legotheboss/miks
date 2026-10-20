@@ -145,7 +145,10 @@ resizes); keep it passing.
   connections to LAN machines failed at random ("Undefined error: 0" from
   ssh) while the router, the internet and VPN paths worked. Verified by
   running the same commands from a `launchctl submit` job, outside Miks.
-  The prompt names itself "Miks Helper (Renderer)".
+  The prompt names itself "Miks Helper (Renderer)". It finds a process's
+  bundle by its Mach-O UUID (in LaunchServices), and Electron's are the same
+  in every Electron app, so the daemon once asked as the repo's "Electron
+  Helper"; `build-app.ts` gives Miks's executables UUIDs of their own.
 - Settings → Permissions lists what macOS lets the window's daemon's
   terminals do and asks for each ahead of time (`server/Permissions.ts`),
   by running `server/permissions.js` (JXA) under `osascript`, which as the
