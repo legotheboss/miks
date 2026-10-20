@@ -923,7 +923,8 @@ const StyledChatPanel = styled.div`
       display: flex;
       align-items: center;
       gap: 8px;
-      margin: 6px 0 -4px;
+      /* Room above, so it stands out while you scroll. */
+      margin: 18px 0 -4px;
       color: #5b4fd1;
       font: ${fonts.displayMedium({ size: 11, line: "14px" })};
 
