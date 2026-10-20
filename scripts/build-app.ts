@@ -3,6 +3,7 @@
 // `yarn release`.
 import { packager } from "@electron/packager";
 import { execFileSync } from "child_process";
+import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 
@@ -144,6 +145,7 @@ export async function buildApp(): Promise<string> {
       CFBundleURLTypes: [{ CFBundleURLName: "com.nfarina.miks", CFBundleURLSchemes: ["miks"] }],
       ...usageDescriptions,
     },
+    afterCopy: [({ buildPath }) => giveOwnUUIDs(path.resolve(buildPath, "../.."))],
     // The daemon runs on the plain helper, as its own process (startDaemon in
     // main.ts), so macOS asks for its terminals' permissions as Miks Helper.
     extendHelperInfo: usageDescriptions,
@@ -164,4 +166,46 @@ export async function buildApp(): Promise<string> {
   run("codesign", ["--verify", "--deep", "--strict", builtApp]);
   console.log(`Built and verified ${path.relative(root, builtApp)}.`);
   return builtApp;
+}
+
+/**
+ * Gives the app's executables Mach-O UUIDs of their own. Electron's are the
+ * same in every Electron app, and Local Network finds a process's bundle by
+ * its UUID (in LaunchServices), so the daemon was sometimes taken for the
+ * repo's Electron Helper, and asked as that. Derived from the bundle ID, so
+ * a build keeps them until Electron changes.
+ */
+function giveOwnUUIDs(contents: string) {
+  const executables = [
+    ...fs.readdirSync(path.join(contents, "MacOS")).map((name) => path.join(contents, "MacOS", name)),
+    ...fs
+      .readdirSync(path.join(contents, "Frameworks"))
+      .filter((name) => name.endsWith(".app"))
+      .flatMap((app) => {
+        const dir = path.join(contents, "Frameworks", app, "Contents/MacOS");
+        return fs.readdirSync(dir).map((name) => path.join(dir, name));
+      }),
+  ];
+  for (const file of executables) {
+    const binary = fs.readFileSync(file);
+    // A thin 64-bit Mach-O (arm64 only): its load commands follow the
+    // 32-byte header, and LC_UUID (0x1b) holds 16 bytes after its own 8.
+    if (binary.readUInt32LE(0) !== 0xfeedfacf) throw new Error(`Not a thin 64-bit Mach-O: ${file}`);
+    let offset = 32;
+    let found = false;
+    for (let i = 0; i < binary.readUInt32LE(16); i++) {
+      const command = binary.readUInt32LE(offset);
+      if (command === 0x1b) {
+        const old = binary.subarray(offset + 8, offset + 24);
+        const uuid = crypto.createHash("sha256").update(bundleId).update(old).digest().subarray(0, 16);
+        uuid[6] = (uuid[6] & 0x0f) | 0x40;
+        uuid[8] = (uuid[8] & 0x3f) | 0x80;
+        uuid.copy(binary, offset + 8);
+        found = true;
+      }
+      offset += binary.readUInt32LE(offset + 4);
+    }
+    if (!found) throw new Error(`No LC_UUID in ${file}`);
+    fs.writeFileSync(file, binary);
+  }
 }
