@@ -139,7 +139,7 @@ function PermissionSettings() {
     };
   }, [connected]);
 
-  const app = answer?.app ?? "Miks Helper";
+  const app = answer?.app ?? "Miks";
   const where = target ? `${target.name}'s` : "this Mac's";
   const request = (id: string) => daemon.send({ type: "requestPermission", id });
   const unasked = (answer?.permissions ?? []).filter(

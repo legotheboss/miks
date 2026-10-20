@@ -48,11 +48,6 @@ function status() {
     result[id] = ["granted", "denied", "notAsked"][$.TCCAccessPreflight($("kTCCService" + service), null)] ?? "unknown";
   }
 
-  // Location isn't TCC's: 0 not asked, 1 restricted, 2 denied, 3 and 4 allowed.
-  ObjC.import("CoreLocation");
-  const location = $.CLLocationManager.alloc.init.authorizationStatus;
-  result.location = location === 0 ? "notAsked" : location >= 3 ? "granted" : "denied";
-
   // Apple Events are per app, and only answerable while it runs (-600).
   ObjC.import("CoreServices");
   ObjC.bindFunction("AEDeterminePermissionToAutomateTarget", ["int", ["pointer", "unsigned int", "unsigned int", "bool"]]);
@@ -98,18 +93,14 @@ function request(id) {
       $.PHPhotoLibrary.requestAuthorizationForAccessLevelHandler(2, ignore);
       break;
     case "bluetooth":
-      // Starting Bluetooth is what asks.
+      // Starting Bluetooth is what asks. Nil, as $(): a null queue crashed
+      // it ("Cannot target object to cooperative root queue").
       ObjC.import("CoreBluetooth");
-      $.CBCentralManager.alloc.initWithDelegateQueue(null, null);
+      $.CBCentralManager.alloc.initWithDelegateQueue($(), $());
       break;
-    case "location": {
-      ObjC.import("CoreLocation");
-      const manager = $.CLLocationManager.alloc.init;
-      manager.requestWhenInUseAuthorization;
-      return wait(() => manager.authorizationStatus !== 0);
-    }
-    // These three add Miks Helper to their list in System Settings and say
-    // so in a dialog of their own, returning at once.
+    // These three add us to their list in System Settings (Accessibility and
+    // Input monitoring as Miks Helper, Screen recording as Miks) and say so
+    // in a dialog of their own, returning at once.
     case "accessibility":
       ObjC.import("ApplicationServices");
       $.AXIsProcessTrustedWithOptions($({ AXTrustedCheckOptionPrompt: true }));

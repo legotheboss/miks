@@ -39,7 +39,6 @@ const DEFINITIONS: Definition[] = [
   { id: "calendars", name: "Calendars", detail: "", kind: "ask", pane: "Calendars" },
   { id: "reminders", name: "Reminders", detail: "", kind: "ask", pane: "Reminders" },
   { id: "photos", name: "Photos", detail: "", kind: "ask", pane: "Photos" },
-  { id: "location", name: "Location", detail: "", kind: "ask", pane: "LocationServices" },
   { id: "bluetooth", name: "Bluetooth", detail: "", kind: "ask", pane: "Bluetooth" },
 ];
 
@@ -53,18 +52,24 @@ const FOLDERS: Record<string, string> = {
 /** The helper's own bundle, which is who macOS takes us for; none when run on plain Node. */
 const bundle = path.resolve(process.execPath, "../../Info.plist");
 
-async function bundleValue(key: string): Promise<string | null> {
+/**
+ * The app the helper is inside (Miks.app). Most permissions go to it, not
+ * the helper (tccd's AUTHREQ_SUBJECT): all but Accessibility and Input
+ * monitoring, which list the helper itself.
+ */
+const app = bundle.match(/^(.*?\.app)\/Contents\/Frameworks\//)?.[1];
+
+async function bundleValue(key: string, plist = bundle): Promise<string | null> {
   try {
-    return (await run("plutil", ["-extract", key, "raw", bundle])).stdout.trim();
+    return (await run("plutil", ["-extract", key, "raw", plist])).stdout.trim();
   } catch {
     return null;
   }
 }
 
-/** What macOS calls us in its dialogs and in System Settings ("Miks Helper"). */
+/** What macOS calls us in its dialogs and in System Settings ("Miks"). */
 export async function permissionsApp(): Promise<string | null> {
-  // Its CFBundleName is the app's ("Miks"); the display name is its own.
-  return (await bundleValue("CFBundleDisplayName")) ?? bundleValue("CFBundleName");
+  return app ? bundleValue("CFBundleName", path.join(app, "Contents/Info.plist")) : null;
 }
 
 const asking = new Set<string>();
@@ -86,8 +91,8 @@ export async function checkPermissions(): Promise<Permission[]> {
 
 /**
  * Asks macOS for one, or, for what only a switch in System Settings grants
- * (or was turned down before), opens that switch's pane, with Miks Helper
- * shown in the Finder to drag in where the list needs adding to. One at a
+ * (or was turned down before), opens that switch's pane, with Miks shown
+ * in the Finder to drag in where the list needs adding to. One at a
  * time; `onChange` hears when it's asking and when it's answered.
  */
 export function requestPermission(id: string, onChange: () => void): Promise<void> {
@@ -122,9 +127,11 @@ export function requestPermission(id: string, onChange: () => void): Promise<voi
 async function openSettings(definition: Definition) {
   await run("open", [`x-apple.systempreferences:com.apple.preference.security?Privacy_${definition.pane}`]);
   // Accessibility and the like list us themselves once asked; Full Disk
-  // Access and these two need us added, by dragging the app in.
-  if (["fullDisk", "developerTools", "appManagement"].includes(definition.id) && fs.existsSync(bundle)) {
-    await run("open", ["-R", path.dirname(path.dirname(bundle))]);
+  // Access and these two need the app added, by dragging it in. The app,
+  // not the helper: a helper dragged in turned on and still counted for
+  // nothing.
+  if (["fullDisk", "developerTools", "appManagement"].includes(definition.id) && app) {
+    await run("open", ["-R", app]);
   }
 }
 

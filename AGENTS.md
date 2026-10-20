@@ -154,6 +154,12 @@ resizes); keep it passing.
   prompts; Local Network's from its rules in
   `/Library/Preferences/com.apple.networkextension.plist` (`plutil -p`).
   Completion handlers never run in JXA, so a request waits on preflight.
+  tccd files most grants under the app the helper is in (Miks), not the
+  helper (`AUTHREQ_SUBJECT` in tccd's log); only Accessibility and Input
+  monitoring list Miks Helper. So it's Miks.app that goes into Developer
+  tools and App management: the helper dragged in was switched on and
+  counted for nothing. Location isn't listed: locationd goes by the
+  executable asking (osascript, here), never the responsible app.
 - `open` passes the calling shell's environment, so launching Miks.app from a
   Miks pane used to carry that pane's variables in.
 - Third-party install scripts are off globally; `scripts/postinstall.ts` does
