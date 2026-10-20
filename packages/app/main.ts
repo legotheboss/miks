@@ -322,6 +322,18 @@ function createWindow(remoteId: string | null = null) {
   // The page would title the window after itself.
   window.on("page-title-updated", (event) => event.preventDefault());
 
+  // ⌃⌘← and ⌃⌘→ (workspaces) are run from here, not by their menu items:
+  // with an arrow, the menu runs the command but the key still goes on to
+  // the page, which hands it back unhandled, and macOS beeps. Stopping it
+  // here stops the menu's too.
+  contents.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown" || !input.meta || !input.control || input.shift || input.alt) return;
+    const name = input.key === "ArrowRight" ? "nextWorkspace" : input.key === "ArrowLeft" ? "previousWorkspace" : null;
+    if (!name) return;
+    event.preventDefault();
+    contents.send("miks:command", name);
+  });
+
   // Nothing navigates the window away from the UI (a stray file drop would).
   contents.on("will-navigate", (event, url) => {
     if (new URL(url).origin !== new URL(contents.getURL()).origin) event.preventDefault();
