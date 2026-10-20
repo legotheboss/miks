@@ -12,6 +12,7 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   type CSSProperties,
+  Fragment,
   type ReactNode,
   use,
   useEffect,
@@ -260,11 +261,17 @@ export function ChatPanel({ tab, visible, supported }: { tab: Tab; visible: bool
 }
 
 type Item =
-  | { kind: "prompt" | "reply"; entry: ChatEntry & { text: string } }
+  | { kind: "prompt"; entry: ChatEntry & { text: string } }
+  | { kind: "reply"; entry: ChatEntry & { text: string }; final?: boolean }
   | { kind: "tools"; entries: Extract<ChatEntry, { kind: "tool" }>[] };
 
-/** Tool calls in a row become one line. */
-function group(entries: ChatEntry[]): Item[] {
+/**
+ * Tool calls in a row become one line. And the start of each turn's final
+ * reply (what comes after its last tool call) is marked: that's the one to
+ * read, after whatever Claude said to itself on the way. Not in a turn
+ * still going (`working`), where the latest words may not be the last.
+ */
+function group(entries: ChatEntry[], working: boolean): Item[] {
   const items: Item[] = [];
   for (const entry of entries) {
     const last = items.at(-1);
@@ -274,6 +281,21 @@ function group(entries: ChatEntry[]): Item[] {
     } else {
       items.push({ kind: entry.kind, entry });
     }
+  }
+
+  let turnStart = 0;
+  const markTurn = (end: number) => {
+    // The replies at the end of the turn, back to its last tool call.
+    let first = end;
+    while (first > turnStart && items[first - 1].kind === "reply") first--;
+    const answer = items[first];
+    // Only worth marking with something before it to tell it from.
+    if (first < end && first > turnStart && answer.kind === "reply") answer.final = true;
+  };
+  for (let i = 0; i <= items.length; i++) {
+    if (i < items.length && items[i].kind !== "prompt") continue;
+    if (i < items.length || !working) markTurn(i);
+    turnStart = i + 1;
   }
   return items;
 }
@@ -467,13 +489,18 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
           <div className="note">Start Claude Code in this tab, and its conversation shows up here.</div>
         )}
         {chat && session && chat.entries.length === 0 && <div className="note">Nothing said yet.</div>}
-        {group(chat?.entries ?? []).map((item) =>
+        {group(chat?.entries ?? [], status === "working").map((item) =>
           item.kind === "tools" ? (
             <ToolCalls key={item.entries[0].id} entries={item.entries} />
           ) : item.kind === "prompt" ? (
             <div key={item.entry.id} className="prompt">
               <div className="bubble">{item.entry.text}</div>
             </div>
+          ) : item.final ? (
+            <Fragment key={item.entry.id}>
+              <div className="final-reply">Reply</div>
+              <Reply text={item.entry.text} />
+            </Fragment>
           ) : (
             <Reply key={item.entry.id} text={item.entry.text} />
           ),
@@ -878,6 +905,28 @@ const StyledChatPanel = styled.div`
           overflow-wrap: anywhere;
           font: ${fonts.displayMono({ size: 11.5, line: "16px" })};
         }
+      }
+    }
+
+    /* Where the turn's final reply starts, so you know where to stop
+       scrolling up. */
+    > .final-reply {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 6px 0 -4px;
+      color: #5b4fd1;
+      font: ${fonts.displayMedium({ size: 11, line: "14px" })};
+
+      @media (prefers-color-scheme: dark) {
+        color: #a8a0ff;
+      }
+
+      &::after {
+        content: "";
+        flex-grow: 1;
+        border-top: 1px solid currentColor;
+        opacity: 0.4;
       }
     }
 
