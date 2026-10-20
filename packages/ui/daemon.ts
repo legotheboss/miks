@@ -2,7 +2,7 @@
 // exposes as `window.miks` (packages/app/preload.cjs). There's one
 // connection per page; components read state with `useDaemon` and terminals
 // subscribe to their pane's stream with `daemon.stream`.
-import { ChatEntry, ClientMessage, DaemonMessage, DaemonState } from "miks/shared/protocol";
+import { ChatEntry, ClientMessage, DaemonMessage, DaemonState, Permission } from "miks/shared/protocol";
 import type { Settings } from "miks/shared/settings";
 import { useSyncExternalStore } from "react";
 
@@ -44,6 +44,9 @@ export type DaemonSnapshot = {
   retrying: boolean;
 };
 
+/** How the daemon's Mac lets its terminals' programs at things, as `permissions` hears it. */
+export type PermissionsEvent = { app: string | null; permissions: Permission[] };
+
 /** A tab's conversation, as `watchChat` hears it. */
 export type ChatEvent = { session: string | null; entries: ChatEntry[]; reset: boolean };
 
@@ -58,6 +61,7 @@ class DaemonClient {
   private readonly chats = new Map<string, (event: ChatEvent) => void>();
   private readonly connectListeners = new Set<() => void>();
   private readonly commandListeners = new Set<(command: string) => void>();
+  private readonly permissionListeners = new Set<(event: PermissionsEvent) => void>();
   private readonly bridge: MiksBridge | undefined = window.miks;
 
   constructor() {
@@ -119,6 +123,12 @@ class DaemonClient {
     };
   }
 
+  /** Every `permissions` answer (ask with `send({ type: "permissions" })`). */
+  onPermissions(listener: (event: PermissionsEvent) => void): Unsubscribe {
+    this.permissionListeners.add(listener);
+    return () => this.permissionListeners.delete(listener);
+  }
+
   /** Called on every (re)connection, which is when terminals must attach. */
   onConnect(listener: () => void): Unsubscribe {
     this.connectListeners.add(listener);
@@ -163,6 +173,11 @@ class DaemonClient {
       case "chat": {
         const { tabId, ...event } = message;
         return this.chats.get(tabId)?.(event);
+      }
+      case "permissions": {
+        const { type: _type, ...event } = message;
+        for (const listener of this.permissionListeners) listener(event);
+        return;
       }
     }
   }

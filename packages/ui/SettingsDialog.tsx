@@ -7,15 +7,16 @@ import { SeparatorLayout, StyledSeparatorLayout } from "crosswing/components/Sep
 import { TabbedButton, TabbedButtonLayout } from "crosswing/components/TabbedButtonLayout";
 import { fonts } from "crosswing/fonts";
 import { DialogView } from "crosswing/modals/dialog";
-import { Plus, X } from "lucide-react";
+import { Check, Plus, X } from "lucide-react";
+import type { Permission } from "miks/shared/protocol";
 import type { Remote } from "miks/shared/settings";
 import { styled } from "styled-components";
 import { useEffect, useState } from "react";
-import { useTarget } from "./daemon";
+import { daemon, type PermissionsEvent, useDaemon, useTarget } from "./daemon";
 import { updateSettings, useSettings } from "./settings";
 import { focusActiveTerminal } from "./TerminalView";
 
-export type SettingsTab = "general" | "remotes" | "advanced";
+export type SettingsTab = "general" | "remotes" | "permissions" | "advanced";
 
 /**
  * Settings (⌘,). Changes apply as you make them, like the rest of macOS;
@@ -37,13 +38,16 @@ export function SettingsDialog({ initialTab = "general", onClose }: { initialTab
   return (
     <DialogView title="Settings" onClose={onClose} form={false}>
       {/* This window is on another Mac, but its window, keys and notifications are this one's. */}
-      {target && <StyledNote>Settings for this Mac. {target.name}'s are in Miks there.</StyledNote>}
+      {target && tab !== "permissions" && <StyledNote>Settings for this Mac. {target.name}'s are in Miks there.</StyledNote>}
       <StyledSettings layout="grow" pad={false} value={tab} onValueChange={setTab}>
         <TabbedButton title="General" value="general">
           <GeneralSettings />
         </TabbedButton>
         <TabbedButton title="Remotes" value="remotes">
           <RemoteSettings />
+        </TabbedButton>
+        <TabbedButton title="Permissions" value="permissions">
+          <PermissionSettings />
         </TabbedButton>
         <TabbedButton title="Advanced" value="advanced">
           <AdvancedSettings />
@@ -112,6 +116,128 @@ function AdvancedSettings() {
     </SeparatorLayout>
   );
 }
+
+/**
+ * What programs in the window's daemon's terminals may do, on its Mac (so
+ * another Mac's, in a remote window), and a way to ask for each ahead of
+ * time, so a program never sits waiting on a dialog nobody's there for.
+ */
+function PermissionSettings() {
+  const target = useTarget();
+  const { connected, state } = useDaemon();
+  const [answer, setAnswer] = useState<PermissionsEvent | null>(null);
+
+  // Again every 2s, for switches flipped in System Settings.
+  useEffect(() => {
+    const unsubscribe = daemon.onPermissions(setAnswer);
+    const check = () => daemon.send({ type: "permissions" });
+    check();
+    const timer = setInterval(check, 2000);
+    return () => {
+      unsubscribe();
+      clearInterval(timer);
+    };
+  }, [connected]);
+
+  const app = answer?.app ?? "Miks Helper";
+  const where = target ? `${target.name}'s` : "this Mac's";
+  const request = (id: string) => daemon.send({ type: "requestPermission", id });
+  const unasked = (answer?.permissions ?? []).filter(
+    (item) => item.kind === "ask" && (item.status === "notAsked" || item.status === "unknown") && !item.asking,
+  );
+
+  if (state && (state.protocol ?? 1) < 7) {
+    return (
+      <StyledPermissions>
+        <p className="intro">{target ? `${target.name}'s Miks` : "This daemon"} is too old to say. Update Miks there.</p>
+      </StyledPermissions>
+    );
+  }
+
+  return (
+    <StyledPermissions>
+      <p className="intro">
+        To macOS, every program in {where} terminals is {app}, and it asks the first time one needs something here, in a
+        dialog{target ? ` on ${target.name}'s screen` : ""}. Ask ahead, and nothing's left waiting on one while you're
+        away.
+      </p>
+      {unasked.length > 0 && (
+        <Button newStyle bordered className="all" onClick={() => unasked.forEach((item) => request(item.id))}>
+          Ask for all {unasked.length}
+        </Button>
+      )}
+      {answer && (
+        <SeparatorLayout bordered>
+          {answer.permissions.map((item) => (
+            <div className="field" key={item.id}>
+              <div className="content">
+                <div className="label">{item.name}</div>
+                {item.detail && <div className="detail">{item.detail}</div>}
+              </div>
+              <PermissionAction item={item} onRequest={() => request(item.id)} />
+            </div>
+          ))}
+        </SeparatorLayout>
+      )}
+    </StyledPermissions>
+  );
+}
+
+function PermissionAction({ item, onRequest }: { item: Permission; onRequest: () => void }) {
+  if (item.asking) return <div className="status">Asking…</div>;
+  if (item.status === "granted") {
+    return (
+      <div className="status granted">
+        <Check /> Allowed
+      </div>
+    );
+  }
+  // Turned down once, macOS won't ask again: it's a switch in System Settings now.
+  const settings = item.kind === "settings" || item.status === "denied";
+  return (
+    <div className="status">
+      {item.status === "denied" && item.kind === "ask" && "Denied"}
+      <Button newStyle bordered onClick={onRequest} children={settings ? "Open Settings" : "Ask"} />
+    </div>
+  );
+}
+
+const StyledPermissions = styled.div`
+  display: flex;
+  flex-flow: column;
+  gap: 12px;
+
+  > .intro {
+    margin: 0;
+    color: ${colors.textSecondary()};
+    font: ${fonts.display({ size: 13, line: "18px" })};
+  }
+
+  > .all {
+    align-self: flex-start;
+  }
+
+  .field > .status {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    width: auto;
+    min-width: 130px;
+    color: ${colors.textSecondary()};
+    font: ${fonts.display({ size: 13, line: "18px" })};
+
+    &.granted {
+      color: #22a06b;
+      gap: 4px;
+
+      > svg {
+        width: 15px;
+        height: 15px;
+      }
+    }
+  }
+`;
 
 /** Badge colors, picked in turn for each Mac added, and by clicking the swatch. */
 const REMOTE_COLORS = ["#3b82f6", "#e5734a", "#22a06b", "#9b5de5", "#d4a20b", "#e0567a"];
@@ -261,7 +387,7 @@ const StyledSettings = styled(TabbedButtonLayout)`
   max-width: 100%;
 
   /* Each tab's content, clear of the tabs. */
-  ${StyledRemotes}, ${StyledSeparatorLayout}:not(${StyledRemotes} *) {
+  ${StyledRemotes}, ${StyledPermissions}, ${StyledSeparatorLayout}:not(${StyledRemotes} *):not(${StyledPermissions} *) {
     margin-top: 16px;
   }
 

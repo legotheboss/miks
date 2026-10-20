@@ -7,6 +7,7 @@ import path from "path";
 import { WebSocket, WebSocketServer } from "ws";
 import type { ClientMessage, DaemonMessage } from "../shared/protocol.ts";
 import type { PaneViewer } from "./Pane.ts";
+import { checkPermissions, permissionsApp, requestPermission } from "./Permissions.ts";
 import { type SavedState, Workspaces } from "./Workspaces.ts";
 
 export type Daemon = {
@@ -156,6 +157,9 @@ export async function serve({
     // And the conversations it's watching, by tab.
     const chats = new Map<string, () => void>();
 
+    const sendPermissions = async () =>
+      send({ type: "permissions", app: await permissionsApp(), permissions: await checkPermissions() });
+
     socket.on("message", (raw) => {
       let message: ClientMessage;
       try {
@@ -234,6 +238,10 @@ export async function serve({
           return workspaces.getPane(message.tabId)?.clear();
         case "resize":
           return workspaces.getPane(message.tabId)?.resize(message.cols, message.rows);
+        case "permissions":
+          return void sendPermissions();
+        case "requestPermission":
+          return void requestPermission(message.id, sendPermissions);
       }
     });
 

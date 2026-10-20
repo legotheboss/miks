@@ -95,7 +95,7 @@ Never SIGTERM a Miks UI; that's an ordinary quit.
   while another Mac's window is on its daemon sends `stopWhenIdle`, so the
   daemon stops when that window goes (which then asks, if programs run);
   its windows connecting send it false. Restart daemon… follows the focused
-  window; a remote's restarts itself (`POST /api/restart`, which re-execs). Test without another Mac:
+  window; a remote's restarts itself (`POST /api/restart`, through launchd). Test without another Mac:
   `MIKS_SSH=scripts/fake-ssh.ts FAKE_SSH_HOME=/tmp/fh`, with a second daemon
   at `MIKS_HOME="/tmp/fh/Library/Application Support/Miks"`.
 - Miks keeps its Claude Code hooks in `~/.claude/settings.json` itself
@@ -146,6 +146,14 @@ resizes); keep it passing.
   ssh) while the router, the internet and VPN paths worked. Verified by
   running the same commands from a `launchctl submit` job, outside Miks.
   The prompt names itself "Miks Helper (Renderer)".
+- Settings → Permissions lists what macOS lets the window's daemon's
+  terminals do and asks for each ahead of time (`server/Permissions.ts`),
+  by running `server/permissions.js` (JXA) under `osascript`, which as the
+  daemon's child counts as Miks Helper. Statuses come from TCC's private
+  `TCCAccessPreflight` (0 granted, 1 denied or off, 2 not asked), which never
+  prompts; Local Network's from its rules in
+  `/Library/Preferences/com.apple.networkextension.plist` (`plutil -p`).
+  Completion handlers never run in JXA, so a request waits on preflight.
 - `open` passes the calling shell's environment, so launching Miks.app from a
   Miks pane used to carry that pane's variables in.
 - Third-party install scripts are off globally; `scripts/postinstall.ts` does

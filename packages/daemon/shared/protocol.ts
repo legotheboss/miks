@@ -6,7 +6,7 @@
  * Bumped when a message changes shape or appears, so a UI talking to another
  * Mac's daemon can tell it's a different Miks. Before 2 there was none.
  */
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
 /**
  * What a coding agent in a pane is up to, as reported by its hooks.
@@ -81,6 +81,24 @@ export type DaemonState = {
   activeWorkspaceId: string | null;
 };
 
+/**
+ * Something macOS lets programs in the daemon's terminals do, once asked
+ * (`ask`: a dialog, the first time one tries) or once switched on in System
+ * Settings (`settings`). Since protocol 7.
+ */
+export type Permission = {
+  id: string;
+  name: string;
+  detail: string;
+  kind: "ask" | "settings";
+  /** For `settings`, `denied` and `notAsked` both mean it's off. */
+  status: PermissionStatus;
+  /** Being asked for right now (a dialog up, waiting on you). */
+  asking: boolean;
+};
+
+export type PermissionStatus = "granted" | "denied" | "notAsked" | "unknown";
+
 //
 // Client → daemon.
 //
@@ -126,7 +144,14 @@ export type ClientMessage =
   /** The UI cleared its terminal (⌘K); the daemon's copy follows. */
   | { type: "clear"; tabId: string }
   | { type: "input"; tabId: string; data: string }
-  | { type: "resize"; tabId: string; cols: number; rows: number };
+  | { type: "resize"; tabId: string; cols: number; rows: number }
+  /** Asks how the permissions stand; the daemon answers with `permissions`. Since protocol 7. */
+  | { type: "permissions" }
+  /**
+   * Asks macOS for one, in a dialog on the daemon's Mac, or opens its pane in
+   * System Settings there; `permissions` follows as it changes. Since protocol 7.
+   */
+  | { type: "requestPermission"; id: string };
 
 //
 // Daemon → client.
@@ -142,6 +167,8 @@ export type DaemonMessage =
    * watching, or when the tab's session changes); otherwise more to append.
    * `session` is the Claude Code session's ID, or null when the tab has none.
    */
-  | { type: "chat"; tabId: string; session: string | null; entries: ChatEntry[]; reset: boolean };
+  | { type: "chat"; tabId: string; session: string | null; entries: ChatEntry[]; reset: boolean }
+  /** `app` is what macOS calls the daemon in its dialogs ("Miks Helper"), if anything. */
+  | { type: "permissions"; app: string | null; permissions: Permission[] };
 
 // A pane whose program exits simply disappears from the next `state`.
