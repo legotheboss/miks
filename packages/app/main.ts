@@ -322,8 +322,8 @@ function createWindow(remoteId: string | null = null) {
   // The page would title the window after itself.
   window.on("page-title-updated", (event) => event.preventDefault());
 
-  // ⌃⌘← and ⌃⌘→ (workspaces) are run from here, not by their menu items:
-  // as menu shortcuts, macOS beeps at them even though they run.
+  // ⌃⌘← and ⌃⌘→ go through workspaces too, a second way to the menu's
+  // ⌃⌘[ and ⌃⌘] (a menu item takes one shortcut).
   contents.on("before-input-event", (event, input) => {
     if (input.type !== "keyDown" || !input.meta || !input.control || input.shift || input.alt) return;
     const name = input.key === "ArrowRight" ? "nextWorkspace" : input.key === "ArrowLeft" ? "previousWorkspace" : null;
@@ -693,14 +693,8 @@ async function openPendingFolders() {
 // which is how ⌘T and friends work while a terminal has focus.
 //
 
-function command(
-  name: string,
-  accelerator: string,
-  label: string,
-  options: MenuItemConstructorOptions = {},
-): MenuItemConstructorOptions {
+function command(name: string, accelerator: string, label: string): MenuItemConstructorOptions {
   return {
-    ...options,
     label,
     accelerator,
     click: (_item, window) => (window as BrowserWindow | undefined)?.webContents.send("miks:command", name),
@@ -805,11 +799,9 @@ function buildMenu() {
       submenu: [
         command("nextTab", "CmdOrCtrl+Shift+]", "Next tab"),
         command("previousTab", "CmdOrCtrl+Shift+[", "Previous tab"),
-        // Arrows, which fingers find more easily than cmux's ⌘⌃[ ]. Shown
-        // here but run from before-input-event (see createWindow): as menu
-        // shortcuts, macOS beeps at them.
-        command("nextWorkspace", "Cmd+Ctrl+Right", "Next workspace", { registerAccelerator: false }),
-        command("previousWorkspace", "Cmd+Ctrl+Left", "Previous workspace", { registerAccelerator: false }),
+        // As in cmux. ⌃⌘← and ⌃⌘→ work too (see createWindow).
+        command("nextWorkspace", "Cmd+Ctrl+]", "Next workspace"),
+        command("previousWorkspace", "Cmd+Ctrl+[", "Previous workspace"),
         { type: "separator" },
         ...Array.from({ length: 9 }, (_, i) => command(`workspace${i + 1}`, `CmdOrCtrl+${i + 1}`, `Workspace ${i + 1}`)),
         { type: "separator" },
