@@ -16,7 +16,8 @@ it exists because cmux grew far past that.
   only through `window.miks`, the Electron preload bridge.
 - `packages/app`: the Electron shell. A window, the menu (accelerators are how
   ⌘T etc. beat the terminal to the keystroke), and a pipe from the renderer to
-  the daemon socket. Starts the daemon detached if nothing is listening.
+  the daemon socket. Starts the daemon (a launchd job) if nothing is
+  listening.
 - `packages/crosswing`: wings-synced shared UI code (`.wings`); check
   `wings sync miks --dry-run` before committing, drift should be 0.
 
@@ -124,10 +125,18 @@ resizes); keep it passing.
   `import type` for types (`verbatimModuleSyntax` enforces it), no enums.
 - The daemon runs on the app's plain helper ("Miks Helper", "Electron Helper"
   in dev) as Node (`ELECTRON_RUN_AS_NODE`): node-pty's prebuilt binary is
-  Node-API, so no rebuild and nothing installed, and macOS attributes the
-  daemon to Miks. Not the main binary: launching that makes macOS bounce
-  Miks in the Dock until it gives up. It calls itself `miks-daemon`
-  (`process.title`).
+  Node-API, so no rebuild and nothing installed. Not the main binary:
+  launching that makes macOS bounce Miks in the Dock until it gives up. It
+  calls itself `miks-daemon` (`process.title`).
+- The daemon is a launchd job (`<home>/daemon.plist`, label
+  `com.nfarina.miks.daemon.<hash of home>`), never a child of the UI: macOS
+  ties a process, for good, to the app that spawned it, and once that UI
+  quit, the Local Network checks for its terminals ("Failed to get the
+  signing identifier for <pid>: No such process" in the log) failed at
+  random. As its own process it's Miks Helper (`com.nfarina.miks.helper`)
+  to macOS, with grants of its own, so the helper carries the usage strings
+  and Miks's entitlements. Its own restart (`/api/restart`) is `launchctl
+  kickstart -k`, since a daemon it spawned would be tied to it the same way.
 - Inside Miks.app, `node_modules/miks` is a stub package re-exporting
   `packages/daemon/shared`: Node won't strip types under node_modules, and the
   packager rewrites symlinks to absolute paths, which codesign rejects.
@@ -136,6 +145,7 @@ resizes); keep it passing.
   connections to LAN machines failed at random ("Undefined error: 0" from
   ssh) while the router, the internet and VPN paths worked. Verified by
   running the same commands from a `launchctl submit` job, outside Miks.
+  The prompt names itself "Miks Helper (Renderer)".
 - `open` passes the calling shell's environment, so launching Miks.app from a
   Miks pane used to carry that pane's variables in.
 - Third-party install scripts are off globally; `scripts/postinstall.ts` does

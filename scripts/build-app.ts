@@ -97,6 +97,25 @@ export async function buildApp(): Promise<string> {
   const usage = (what: string) => `A program running in Miks wants to use ${what}.`;
 
   console.log(`Packaging with Electron ${electronVersion}…`);
+  // Why a program in a terminal wants each thing macOS asks about.
+  const usageDescriptions = {
+    NSAppleEventsUsageDescription: usage("other apps through AppleScript"),
+    NSBluetoothAlwaysUsageDescription: usage("Bluetooth"),
+    NSCalendarsFullAccessUsageDescription: usage("your calendars"),
+    NSCalendarsUsageDescription: usage("your calendars"),
+    NSCameraUsageDescription: usage("the camera"),
+    NSContactsUsageDescription: usage("your contacts"),
+    NSLocationUsageDescription: usage("your location"),
+    // Without it macOS never asks, and connections from terminals to other
+    // machines on your network fail at random ("Undefined error: 0" from
+    // ssh), though the internet, and anything over a VPN, work.
+    NSLocalNetworkUsageDescription: usage("devices on your local network"),
+    NSMicrophoneUsageDescription: usage("the microphone"),
+    NSPhotoLibraryUsageDescription: usage("your photos"),
+    NSRemindersFullAccessUsageDescription: usage("your reminders"),
+    NSRemindersUsageDescription: usage("your reminders"),
+  };
+
   const [appDir] = await packager({
     dir: stage,
     out: buildDir,
@@ -123,28 +142,19 @@ export async function buildApp(): Promise<string> {
       ],
       // miks://update, which `miks update` opens.
       CFBundleURLTypes: [{ CFBundleURLName: "com.nfarina.miks", CFBundleURLSchemes: ["miks"] }],
-      NSAppleEventsUsageDescription: usage("other apps through AppleScript"),
-      NSBluetoothAlwaysUsageDescription: usage("Bluetooth"),
-      NSCalendarsFullAccessUsageDescription: usage("your calendars"),
-      NSCalendarsUsageDescription: usage("your calendars"),
-      NSCameraUsageDescription: usage("the camera"),
-      NSContactsUsageDescription: usage("your contacts"),
-      NSLocationUsageDescription: usage("your location"),
-      // Without it macOS never asks, and connections from terminals to other
-      // machines on your network fail at random ("Undefined error: 0" from
-      // ssh), though the internet, and anything over a VPN, work.
-      NSLocalNetworkUsageDescription: usage("devices on your local network"),
-      NSMicrophoneUsageDescription: usage("the microphone"),
-      NSPhotoLibraryUsageDescription: usage("your photos"),
-      NSRemindersFullAccessUsageDescription: usage("your reminders"),
-      NSRemindersUsageDescription: usage("your reminders"),
+      ...usageDescriptions,
     },
+    // The daemon runs on the plain helper, as its own process (startDaemon in
+    // main.ts), so macOS asks for its terminals' permissions as Miks Helper.
+    extendHelperInfo: usageDescriptions,
     osxSign: {
       identity,
       continueOnError: false,
       optionsForFile: (file) =>
-        // The app's own binary gets Miks's entitlements; helpers keep the defaults.
-        file.endsWith("/Contents/MacOS/Miks") || file.endsWith("Miks.app")
+        // Miks's entitlements for the app and the helper the daemon runs on
+        // (under the hardened runtime, no entitlement means no access); the
+        // other helpers keep the defaults.
+        /\/(Miks|Miks Helper)\.app$|\/Contents\/MacOS\/(Miks|Miks Helper)$/.test(file)
           ? { hardenedRuntime: true, entitlements: path.join(root, "packages/app/entitlements.plist") }
           : { hardenedRuntime: true },
     },

@@ -1,4 +1,5 @@
-import { spawn } from "child_process";
+import { spawn, spawnSync } from "child_process";
+import crypto from "crypto";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, screen, shell } from "electron";
 import type { MenuItemConstructorOptions, WebContents } from "electron";
 import fs from "fs";
@@ -53,7 +54,10 @@ async function connectDaemon(remote: Remote | null): Promise<WebSocket> {
   try {
     return await connectOnce();
   } catch {
-    startDaemon();
+    // One start for every window reconnecting at once: another's would
+    // replace the job, stopping the daemon this one started.
+    starting ??= startDaemon().finally(() => (starting = undefined));
+    await starting;
   }
 
   const deadline = Date.now() + 5000;
@@ -67,26 +71,86 @@ async function connectDaemon(remote: Remote | null): Promise<WebSocket> {
   }
 }
 
-function startDaemon() {
-  fs.mkdirSync(path.dirname(logPath()), { recursive: true, mode: 0o700 });
-  const log = fs.openSync(logPath(), "a");
+let starting: Promise<void> | undefined;
 
-  // The daemon runs on our own binary as plain Node (node-pty's prebuilt
+/** Starts this Mac's daemon, resolving once it answers (or 5s on). */
+async function startDaemon() {
+  fs.mkdirSync(miksHome(), { recursive: true, mode: 0o700 });
+
+  // The daemon runs on our own helper as plain Node (node-pty's prebuilt
   // binary uses Node-API, so it loads in any Node), which needs nothing
-  // installed and makes macOS attribute the daemon, and the programs in its
-  // terminals, to Miks. Apps launched from the Finder get a bare PATH, hence
-  // the usual suspects.
-  const env: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: "1" };
+  // installed. Apps launched from the Finder get a bare PATH, hence the
+  // usual suspects.
+  const label = `com.nfarina.miks.daemon.${crypto.createHash("sha1").update(miksHome()).digest("hex").slice(0, 8)}`;
+  const env: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: "1", MIKS_DAEMON_JOB: label };
   env.PATH = [env.PATH, "/opt/homebrew/bin", "/usr/local/bin"].filter(Boolean).join(":");
 
-  // Detached, so it outlives us: that's the whole point.
-  const child = spawn(helperPath(), [daemonMain, "serve"], {
-    detached: true,
-    stdio: ["ignore", log, log],
-    env,
-  });
-  child.unref();
-  fs.closeSync(log);
+  // A launchd job, not a child of ours, so it outlives us (that's the whole
+  // point) as its own process. macOS holds what a process spawns to the app
+  // that spawned it, for good: a daemon we spawned stays ours after we quit,
+  // and the local network checks for its terminals, finding no such
+  // process, failed at random. As its own process it's Miks Helper, with
+  // permissions of its own.
+  const plist = path.join(miksHome(), "daemon.plist");
+  fs.writeFileSync(
+    plist,
+    plistXML({
+      Label: label,
+      ProgramArguments: [helperPath(), daemonMain, "serve"],
+      EnvironmentVariables: Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] != null)),
+      StandardOutPath: logPath(),
+      StandardErrorPath: logPath(),
+      RunAtLoad: true,
+      // Its terminals run whatever you run: no background throttling, and
+      // nothing it spawns is killed when it exits (a restart's replacement).
+      ProcessType: "Interactive",
+      AbandonProcessGroup: true,
+    }),
+  );
+
+  // Replacing any job from before, which may be another build's.
+  const domain = `gui/${process.getuid?.()}`;
+  spawnSync("launchctl", ["bootout", `${domain}/${label}`]);
+  for (let attempt = 0; ; attempt++) {
+    const result = spawnSync("launchctl", ["bootstrap", domain, plist], { encoding: "utf8" });
+    if (result.status === 0) break;
+    // A bootout finishes after it returns ("Input/output error" until then).
+    if (attempt === 20) throw new Error(`Couldn't start the daemon: ${result.stderr.trim()}`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+
+  for (let i = 0; i < 50 && !(await daemonGet("/api/ping")); i++) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
+/** A launchd property list, for the values startDaemon uses. */
+type PlistValue = string | boolean | PlistValue[] | { [key: string]: PlistValue };
+
+function plistXML(dict: { [key: string]: PlistValue }): string {
+  // Control characters aren't allowed in XML at all; one in any variable
+  // would make the whole job fail to load.
+  const escape = (text: string) =>
+    text
+      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  const value = (item: PlistValue): string =>
+    typeof item === "boolean"
+      ? `<${item}/>`
+      : typeof item === "string"
+        ? `<string>${escape(item)}</string>`
+        : Array.isArray(item)
+          ? `<array>${item.map(value).join("")}</array>`
+          : `<dict>${Object.entries(item)
+              .map(([key, inner]) => `<key>${escape(key)}</key>${value(inner)}`)
+              .join("")}</dict>`;
+  return (
+    `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n` +
+    `<plist version="1.0">${value(dict)}</plist>\n`
+  );
 }
 
 /**
