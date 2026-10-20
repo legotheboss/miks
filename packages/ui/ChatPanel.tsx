@@ -512,7 +512,7 @@ const StyledChatPanel = styled.div`
   min-height: 0;
   background: ${colors.textBackgroundPanel()};
   color: ${colors.text()};
-  font: ${fonts.display({ size: 14, line: "21px" })};
+  font: ${fonts.display({ size: 14, line: "23px" })};
 
   > .note,
   > .scroller > .note {
@@ -669,6 +669,12 @@ const StyledChatPanel = styled.div`
         border: 1px solid ${colors.separator()};
         overflow-wrap: anywhere;
         font: ${fonts.displayMono({ size: 12.5, line: "18px" })};
+        /* Blue-violet, so code stands out from the prose around it. */
+        color: #5b4fd1;
+
+        @media (prefers-color-scheme: dark) {
+          color: #a8a0ff;
+        }
       }
 
       table {
