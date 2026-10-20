@@ -75,13 +75,11 @@ run("codesign", ["--verify", "--deep", "--strict", installPath]);
 if (wasRunning) {
   console.log("Relaunching Miks…");
   // `open` hands the app our environment, and through the daemon, every
-  // terminal in it. Run from a Claude Code session, as this often is, that
-  // included its child-session marker, which stopped Claude Code saving
-  // transcripts in every pane. Launch it clean, as the Dock would.
-  const env = Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => !/^(CLAUDE|CMUX_|MIKS_|ELECTRON_)/.test(key)),
-  );
-  execFileSync("open", [installPath], { stdio: "inherit", env });
+  // terminal in it. Run from a Claude Code session under yarn, as this often
+  // is, that was Claude Code's child-session marker (which stopped it saving
+  // transcripts in every pane), yarn's npm_* and its temporary folders on
+  // PATH. Given none, the app gets launchd's, as from the Dock.
+  execFileSync("/usr/bin/open", [installPath], { stdio: "inherit", env: {} });
 }
 
 // codesign describes a signature on stderr.
