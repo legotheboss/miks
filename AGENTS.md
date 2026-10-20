@@ -161,7 +161,8 @@ resizes); keep it passing.
   helper (`AUTHREQ_SUBJECT` in tccd's log); only Accessibility and Input
   monitoring list Miks Helper. So it's Miks.app that goes into Developer
   tools and App management: the helper dragged in was switched on and
-  counted for nothing. Location isn't listed: locationd goes by the
+  counted for nothing. With Full Disk Access, reading Desktop or Downloads
+  never asks, and their preflight stays "not asked". Location isn't listed: locationd goes by the
   executable asking (osascript, here), never the responsible app.
 - `open` passes the calling shell's environment, so launching Miks.app from a
   Miks pane used to carry that pane's variables in.
