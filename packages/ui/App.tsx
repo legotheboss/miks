@@ -9,7 +9,6 @@ import { DEFAULT_SETTINGS } from "miks/shared/settings";
 import { useEffect, useRef } from "react";
 import { styled } from "styled-components";
 import { ChatLayout, isChatOpen, setChatOpen, toggleChat } from "./ChatPanel";
-import { PillHost } from "./Pill";
 import { closeTab, closeWorkspace } from "./closing";
 import { daemon, type Target, useDaemon, useTarget } from "./daemon";
 import { getSettings, setFontSize, updateSettings, useSettings } from "./settings";
@@ -125,7 +124,6 @@ export function App() {
         </div>
         <Sidebar workspaces={state.workspaces} activeWorkspaceId={state.activeWorkspaceId} home={state.home} />
       </PanelLayout>
-      <PillHost />
     </StyledApp>
   );
 }

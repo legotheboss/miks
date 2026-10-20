@@ -25,7 +25,7 @@ import { styled } from "styled-components";
 import { daemon } from "./daemon";
 import { FileView } from "./FileView";
 import { renderMarkdown } from "./markdown";
-import { showPill } from "./Pill";
+import { type Notice, Pill } from "./Pill";
 import { useSettings } from "./settings";
 import {
   droppedText,
@@ -36,6 +36,10 @@ import {
   sendEscape,
   sendToTerminal,
 } from "./TerminalView";
+
+/** ⌃D: hides the panel (in the composer, instead of deleting forward). */
+const isHideKey = (event: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean }) =>
+  event.key === "d" && event.ctrlKey && !event.metaKey && !event.altKey;
 
 /**
  * What the panel keeps about a tab goes by its key, which a daemon restart
@@ -437,6 +441,8 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
   // Sent from here and not yet in the transcript: shown right away, faded.
   const [pending, setPending] = useState<{ id: string; text: string; time: number }[]>([]);
   const [quote, setQuote] = useState<{ text: string; top: number; left: number } | null>(null);
+  // What ⌃V did, above the composer.
+  const [notice, setNotice] = useState<Notice | null>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLFormElement>(null);
   const atBottom = useRef(true);
@@ -475,6 +481,12 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
     const scroller = scrollerRef.current;
     if (scroller && atBottom.current) scroller.scrollTop = scroller.scrollHeight;
   }, [chat, pending]);
+
+  // ⌃D hides the panel for the terminal, where two more quit Claude Code.
+  function hide() {
+    setChatOpen(tab, false);
+    focusActiveTerminal();
+  }
 
   // Escape goes back to the terminal; over it, there's no getting to it but
   // by closing the panel.
@@ -521,7 +533,10 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
   // prompt, in the terminal, ahead of what you send from here.
   async function pasteImage() {
     const image = await pasteClipboardImage(tab.id);
-    showPill(image ? "Image pasted into Claude's prompt" : "No image on the clipboard");
+    setNotice({
+      id: (notice?.id ?? 0) + 1,
+      text: image ? "Image pasted into Claude's prompt" : "No image on the clipboard",
+    });
   }
 
   // Return is always a newline; ⌘Return sends.
@@ -532,6 +547,9 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
     } else if (isPasteImageKey(event)) {
       event.preventDefault();
       void pasteImage();
+    } else if (isHideKey(event)) {
+      event.preventDefault();
+      hide();
     } else if (event.key === "Escape") {
       event.preventDefault();
       leave();
@@ -641,6 +659,9 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
           } else if (isPasteImageKey(event)) {
             event.preventDefault();
             void pasteImage();
+          } else if (isHideKey(event)) {
+            event.preventDefault();
+            hide();
           } else if ((event.key === "ArrowUp" || event.key === "ArrowDown") && plain) {
             event.preventDefault();
             jump(event.key === "ArrowUp" ? -1 : 1);
@@ -703,6 +724,7 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
         onDragOver={onDragOver}
         onDrop={onDrop}
       >
+        <Pill notice={notice} />
         <TextArea
           value={text}
           onValueChange={changeText}
@@ -1178,6 +1200,7 @@ const StyledChatPanel = styled.div`
   }
 
   > .composer {
+    position: relative;
     flex-shrink: 0;
     display: flex;
     align-items: flex-end;

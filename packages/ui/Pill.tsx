@@ -1,60 +1,50 @@
 import { colors, shadows } from "crosswing/colors";
 import { fonts } from "crosswing/fonts";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 import { styled } from "styled-components";
 
-/**
- * A word about something that just happened, in a pill that slides down
- * from the top of the window and back up: out of the way of what you're
- * typing, unlike a toast down where the composer is.
- */
-let current: { id: number; text: string } | null = null;
-const listeners = new Set<() => void>();
+/** A word about something that just happened. A new `id` shows it again. */
+export type Notice = { id: number; text: string };
 
-export function showPill(text: string) {
-  current = { id: (current?.id ?? 0) + 1, text };
-  for (const listener of listeners) listener();
-}
-
-/** How long a pill stays before it goes back up. */
+/** How long a pill stays before it goes. */
 const SHOWN_FOR = 1800;
 
-export function PillHost() {
-  const pill = useSyncExternalStore(
-    (listener) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-    () => current,
-  );
+/**
+ * A notice in a pill, floating just above whatever it's placed in (which
+ * must be positioned): in sight of what you're typing, not over it. It
+ * rises in, stays a moment, and goes.
+ */
+export function Pill({ notice }: { notice: Notice | null }) {
   const [shown, setShown] = useState(false);
 
-  // In, a moment on screen, and out (a new pill starts it over).
   useEffect(() => {
-    if (!pill) return;
+    if (!notice) return;
     const frame = requestAnimationFrame(() => setShown(true));
     const timer = setTimeout(() => setShown(false), SHOWN_FOR);
     return () => {
       cancelAnimationFrame(frame);
       clearTimeout(timer);
     };
-  }, [pill?.id]);
+  }, [notice?.id]);
 
   return (
     <StyledPill data-shown={shown} aria-live="polite">
-      {pill?.text}
+      {notice?.text}
     </StyledPill>
   );
 }
 
 const StyledPill = styled.div`
-  position: fixed;
-  top: 8px;
+  position: absolute;
+  bottom: calc(100% + 8px);
   left: 50%;
-  z-index: 100;
-  transform: translate(-50%, calc(-100% - 12px));
-  transition: transform 0.25s ease-in-out;
-  max-width: calc(100% - 200px);
+  z-index: 2;
+  max-width: calc(100% - 24px);
+  transform: translate(-50%, 6px);
+  opacity: 0;
+  transition:
+    transform 0.2s ease-out,
+    opacity 0.2s ease-out;
   padding: 6px 14px;
   border-radius: 999px;
   background: ${colors.textBackground()};
@@ -66,9 +56,9 @@ const StyledPill = styled.div`
   overflow: hidden;
   text-overflow: ellipsis;
   pointer-events: none;
-  -webkit-app-region: no-drag;
 
   &[data-shown="true"] {
     transform: translate(-50%, 0);
+    opacity: 1;
   }
 `;
