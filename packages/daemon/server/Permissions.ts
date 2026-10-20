@@ -81,6 +81,9 @@ export async function checkPermissions(): Promise<Permission[]> {
     statuses = JSON.parse((await run("osascript", ["-l", "JavaScript", script, "status"])).stdout);
   } catch {}
   statuses.localNetwork = await localNetworkStatus();
+  // Full Disk Access covers the folders, and with it reading them never
+  // asks, so they'd stay "not asked" for good.
+  if (statuses.fullDisk === "granted") for (const id of Object.keys(FOLDERS)) statuses[id] = "granted";
 
   return DEFINITIONS.map(({ pane: _pane, ...definition }) => ({
     ...definition,
@@ -106,6 +109,9 @@ export function requestPermission(id: string, onChange: () => void): Promise<voi
       const [current] = (await checkPermissions()).filter((item) => item.id === id);
       if (current?.status === "granted") return;
       if (definition.kind === "settings" || current?.status === "denied") {
+        // Asking is what puts us in these lists (switched off), so there's
+        // a switch to turn on.
+        if (LISTS_ITSELF.includes(id)) await run("osascript", ["-l", "JavaScript", script, "request", id]).catch(() => {});
         await openSettings(definition);
         return;
       }
@@ -124,15 +130,20 @@ export function requestPermission(id: string, onChange: () => void): Promise<voi
   return queue;
 }
 
+/** The ones whose list in System Settings asking adds us to. */
+const LISTS_ITSELF = ["accessibility", "screen", "input"];
+
+/** The ones System Settings lists under the helper, not the app (see `app`). */
+const AS_HELPER = ["accessibility", "input"];
+
 async function openSettings(definition: Definition) {
   await run("open", [`x-apple.systempreferences:com.apple.preference.security?Privacy_${definition.pane}`]);
-  // Accessibility and the like list us themselves once asked; Full Disk
-  // Access and these two need the app added, by dragging it in. The app,
-  // not the helper: a helper dragged in turned on and still counted for
-  // nothing.
-  if (["fullDisk", "developerTools", "appManagement"].includes(definition.id) && app) {
-    await run("open", ["-R", app]);
-  }
+  // And what to drag in, should we not be in its list: the helper or the
+  // app, whichever it goes by. A helper dragged in where the app was wanted
+  // turned on and still counted for nothing. (The rest take no drags.)
+  if (definition.kind !== "settings") return;
+  const bundleDir = AS_HELPER.includes(definition.id) ? path.dirname(path.dirname(bundle)) : app;
+  if (bundleDir && fs.existsSync(bundleDir)) await run("open", ["-R", bundleDir]);
 }
 
 /**
