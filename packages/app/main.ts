@@ -352,6 +352,10 @@ function createWindow(remoteId: string | null = null) {
   rememberWindowState(window, key);
 
   windows.set(key, window);
+  // Not while quitting, when windows closing hand focus to the others.
+  window.on("focus", () => {
+    if (!quitting) fs.writeFileSync(frontWindowPath(), JSON.stringify(key));
+  });
   // Not for this Mac's, which opens first, before the list is read.
   if (remoteId) rememberOpenRemotes();
   if (remoteId) confirmRemoteClose(window);
@@ -421,6 +425,19 @@ function reopenRemotes() {
   try {
     const ids: string[] = JSON.parse(fs.readFileSync(openRemotesPath(), "utf8"));
     for (const id of ids) if (settings.remotes.some((remote) => remote.id === id)) openWindow(id);
+  } catch {}
+}
+
+/** Which window was in front, so that's the one in front again after a relaunch. */
+const frontWindowPath = () => path.join(app.getPath("userData"), "front-window.json");
+
+function restoreFrontWindow() {
+  try {
+    const window = windows.get(JSON.parse(fs.readFileSync(frontWindowPath(), "utf8")));
+    if (!window) return;
+    // In the background, in front of the others without taking focus.
+    if (BACKGROUND) window.moveTop();
+    else window.focus();
   } catch {}
 }
 
@@ -826,6 +843,7 @@ app.whenReady().then(() => {
   buildMenu();
   createWindow();
   reopenRemotes();
+  restoreFrontWindow();
   updateClaudeHooks();
   startUpdates(confirmQuitForUpdate);
 

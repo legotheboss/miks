@@ -702,7 +702,9 @@ const StyledChatPanel = styled.div`
 
       button {
         display: flex;
-        align-items: center;
+        /* The name and its summary are in different fonts: line them up by
+           their text, not their boxes. */
+        align-items: baseline;
         gap: 6px;
         width: 100%;
         min-width: 0;
@@ -721,6 +723,7 @@ const StyledChatPanel = styled.div`
 
       .chevron {
         flex-shrink: 0;
+        align-self: center;
         transition: transform 0.15s;
       }
 
