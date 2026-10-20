@@ -593,6 +593,35 @@ const StyledChatPanel = styled.div`
         margin: 4px 0;
       }
 
+      /* Task lists ("- [x]"): a box of our own instead of a bullet, since
+         marked's are disabled checkboxes, which the browser fades. */
+      li:has(> input[type="checkbox"]:first-child) {
+        list-style: none;
+        margin-left: -20px;
+      }
+
+      input[type="checkbox"] {
+        appearance: none;
+        width: 14px;
+        height: 14px;
+        margin: 0 6px 0 0;
+        vertical-align: -2px;
+        border-radius: 4px;
+        border: 1.5px solid ${colors.textSecondary({ alpha: 0.6 })};
+        box-sizing: border-box;
+
+        &:checked {
+          border: none;
+          background: #5b4fd1
+            url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cpath d='M3.5 7.2l2.3 2.3 4.7-4.9' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+            center / 14px 14px no-repeat;
+
+          @media (prefers-color-scheme: dark) {
+            background-color: #7d70f0;
+          }
+        }
+      }
+
       h1,
       h2,
       h3,
