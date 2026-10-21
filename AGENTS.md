@@ -283,6 +283,31 @@ resizes); keep it passing.
   open or not apart from the file (⌘⇧C, Escape in the editor once
   CodeMirror has nothing to close): hidden, the file stays as it was.
 
+- `miks browse <url>` (`POST /api/browse`, `Tab.page`) shows a page in the
+  panel (`ui/BrowseView.tsx`, a `<webview>`), switching Chat | file | page
+  with whatever else it has. Everything it loads goes out from the tab's
+  daemon, so a remote window's `localhost` is the remote's on every port:
+  the webview's session (`persist:browse-<window key>`, one per daemon, so
+  each Mac has its own cookies) has as its proxy a front in Electron main
+  (`app/browse.ts`) on 127.0.0.1, which hands each connection to the
+  daemon's socket (through the tunnel), where `server/Proxy.ts` makes it:
+  CONNECT for HTTPS and WebSockets (end to end, no interception), full-URL
+  requests for plain HTTP. Chromium takes a proxy only as host:port, not a
+  socket. It never proxies loopback unless the bypass rules say
+  `<-loopback>`. And it can't authenticate to SOCKS, so the front is HTTP,
+  asking for a random password that `app.on("login")` gives only its
+  sessions (any user of the Mac can reach 127.0.0.1). `will-attach-webview`
+  strips the preload (`window.miks` types into shells) and Node, and allows
+  only the window's own partition; a page's new windows load in its place.
+  A hidden page is `visibility: hidden`, not `display: none`, so its
+  webview keeps its size. Verified with the fake-ssh remote: a page and a
+  fetch to another port both came from the remote daemon (by `lsof`).
+- ⌘⇧F (or the tab bar's button beside the panel's) has the panel fill the
+  tab, per tab like open or not: CSS over the same PanelLayout (nothing
+  remounts, so a page keeps its state), the terminal keeping its full size
+  under it (no SIGWINCH), and showing or hiding it fades rather than
+  slides.
+
 - Settings (`miks/shared/settings`) live in `settings.json`, owned by the
   Electron main process and pushed to every window; not localStorage, which
   is per origin, so the dev build and Miks.app would each have their own.

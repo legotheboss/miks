@@ -23,6 +23,10 @@ I enjoyed [cmux](https://github.com/manaflow-ai/cmux) until I realized it bundle
 - `miks open <file>` and `miks edit <file>` show a file in that panel, with
   syntax highlighting and a proper editor; and `$EDITOR` in Miks tabs is
   that, so git's commit messages and Claude Code's ⌃G open there too
+- `miks browse <url>` shows a web page in that panel, loaded from the Mac the
+  terminal is on: in a remote window, `miks browse localhost:3000` is that
+  Mac's dev server, every port of it, with no tunnels to set up. ⌘⇧F has
+  the panel fill the tab
 - Follows light and dark mode, and tells Claude Code when it changes
 - Remote windows: a window on another Mac's terminals, over SSH, with
   copying landing on the Mac you're at and dropped files sent over. `miks update` in one updates Miks on that Mac

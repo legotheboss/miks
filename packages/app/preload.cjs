@@ -29,6 +29,8 @@ contextBridge.exposeInMainWorld("miks", {
   /** Copies dropped files to a temporary folder (on a remote window's Mac) or the tab's; resolves with where. */
   sendFiles: (tabId, paths, into) => ipcRenderer.invoke("miks:sendFiles", tabId, paths, into),
   sendClipboardImage: (tabId) => ipcRenderer.invoke("miks:sendClipboardImage", tabId),
+  /** The session for this window's `miks browse` pages, set up to go through its daemon. */
+  browsePartition: () => ipcRenderer.invoke("miks:browsePartition"),
 });
 
 function subscribe(channel, listener) {

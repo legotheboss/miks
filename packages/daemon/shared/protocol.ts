@@ -6,7 +6,7 @@
  * Bumped when a message changes shape or appears, so a UI talking to another
  * Mac's daemon can tell it's a different Miks. Before 2 there was none.
  */
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 9;
 
 /**
  * What a coding agent in a pane is up to, as reported by its hooks.
@@ -63,6 +63,8 @@ export type Tab = {
   kept?: boolean;
   /** A file shown in the tab's panel (`miks open`, `miks edit`). Since protocol 8. */
   file?: OpenFile;
+  /** A page `miks browse` put in the tab's panel. */
+  page?: OpenPage;
 };
 
 /** A file `miks open` or `miks edit` put in a tab's panel. */
@@ -78,6 +80,16 @@ export type OpenFile = {
 };
 
 /** Why a file's contents aren't there to show. */
+/**
+ * A web page `miks browse` put in a tab's panel, loaded through the daemon
+ * (its Mac's `localhost`, DNS and network), wherever the window is.
+ */
+export type OpenPage = {
+  /** This opening of it: browsing again, even to the same URL, is another. */
+  id: string;
+  url: string;
+};
+
 export type FileProblem = "binary" | "large" | "unreadable";
 
 export type Workspace = {
@@ -128,6 +140,8 @@ export type ClientMessage =
   /** An empty title goes back to following the active tab. */
   | { type: "renameWorkspace"; workspaceId: string; title: string }
   | { type: "createTab"; workspaceId: string }
+  /** Closes the tab's page (`miks browse`). */
+  | { type: "closePage"; tabId: string }
   /** Moves a workspace to a position in the sidebar (counted without it). */
   | { type: "moveWorkspace"; workspaceId: string; index: number }
   /** Moves a tab to a position in its workspace's tab bar (counted without it). */

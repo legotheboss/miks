@@ -8,7 +8,7 @@ import { type AgentStatus, type DaemonState, PROTOCOL_VERSION } from "miks/share
 import { DEFAULT_SETTINGS } from "miks/shared/settings";
 import { useEffect, useRef } from "react";
 import { styled } from "styled-components";
-import { ChatLayout, isChatOpen, setChatOpen, toggleChat } from "./ChatPanel";
+import { ChatLayout, hasPanel, isChatOpen, setChatOpen, toggleChat, toggleExpanded } from "./ChatPanel";
 import { closeTab, closeWorkspace } from "./closing";
 import { daemon, type Target, useDaemon, useTarget } from "./daemon";
 import { getSettings, setFontSize, updateSettings, useSettings } from "./settings";
@@ -293,9 +293,14 @@ function runCommand(command: string) {
 
   switch (command) {
     case "toggleChat": {
-      // Only for a tab with something to show: Claude Code, or a file.
+      // Only for a tab with something to show: Claude Code, a file or a page.
       const tab = tabs[tabIndex];
-      if (tab?.agent || tab?.file) toggleChat(tab);
+      if (tab && hasPanel(tab)) toggleChat(tab);
+      return;
+    }
+    case "toggleExpanded": {
+      const tab = tabs[tabIndex];
+      if (tab && hasPanel(tab)) toggleExpanded(tab);
       return;
     }
     case "newTab":

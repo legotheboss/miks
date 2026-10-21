@@ -10,6 +10,7 @@ import { logPath, miksHome, socketPath } from "miks/shared/paths";
 import { DEFAULT_SETTINGS, displayPath, type Remote, type Settings } from "miks/shared/settings";
 import os from "os";
 import type { WebSocket } from "ws";
+import { browsePartition, isBrowsePartition } from "./browse.ts";
 import { syncClaudeHooks } from "./claudeHooks.ts";
 import { stopAllTunnels, stopTunnel, tunnelSocket } from "./tunnels.ts";
 import { checkForUpdates, startUpdates, updateFromShell } from "./updates.ts";
@@ -372,6 +373,8 @@ function createWindow(remoteId: string | null = null) {
       preload: path.join(import.meta.dirname, "preload.cjs"),
       contextIsolation: true,
       sandbox: true,
+      // The panel's browser (`miks browse`; browse.ts).
+      webviewTag: true,
     },
   });
 
@@ -405,6 +408,25 @@ function createWindow(remoteId: string | null = null) {
   contents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: "deny" };
+  });
+
+  // The panel's browser shows any page at all, so it gets nothing of
+  // Miks's: no preload (`window.miks` types into your shells), no Node, and
+  // only the session that goes through this window's daemon.
+  contents.on("will-attach-webview", (event, webPreferences, params) => {
+    delete webPreferences.preload;
+    webPreferences.nodeIntegration = false;
+    webPreferences.contextIsolation = true;
+    webPreferences.sandbox = true;
+    if (!isBrowsePartition(key, params.partition)) event.preventDefault();
+  });
+  // A page's new windows open in its place: a window of their own would be
+  // outside the panel, and its proxy.
+  contents.on("did-attach-webview", (_event, guest) => {
+    guest.setWindowOpenHandler(({ url }) => {
+      if (/^https?:/i.test(url)) void guest.loadURL(url);
+      return { action: "deny" };
+    });
   });
 
   const devUrl = process.env.MIKS_UI_URL;
@@ -608,6 +630,18 @@ ipcMain.handle("miks:sendFiles", async (event, tabId: string, paths: string[], i
     if (where) saved.push(where);
   }
   return saved;
+});
+
+// The session for a window's browser, through its daemon (browse.ts).
+ipcMain.handle("miks:browsePartition", async (event) => {
+  const remoteId = windowRemotes.get(event.sender);
+  // By its id, not this window: the front outlives the window that started it.
+  return browsePartition(remoteId ?? LOCAL, async () => {
+    if (!remoteId) return socketPath();
+    const remote = settings.remotes.find((entry) => entry.id === remoteId);
+    if (!remote) throw new Error("This machine was removed in Settings.");
+    return tunnelSocket(remote);
+  });
 });
 
 /**
@@ -868,7 +902,8 @@ function buildMenu() {
       label: "View",
       submenu: [
         command("toggleSidebar", "CmdOrCtrl+B", "Toggle sidebar"),
-        command("toggleChat", "CmdOrCtrl+Shift+C", "Toggle chat"),
+        command("toggleChat", "CmdOrCtrl+Shift+C", "Toggle panel"),
+        command("toggleExpanded", "CmdOrCtrl+Shift+F", "Panel fills the tab"),
         { type: "separator" },
         command("fontBigger", "CmdOrCtrl+=", "Bigger text"),
         command("fontSmaller", "CmdOrCtrl+-", "Smaller text"),

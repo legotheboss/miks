@@ -18,6 +18,8 @@ export type MiksBridge = {
   sendFiles(tabId: string, paths: string[], into: "tmp" | "cwd"): Promise<string[]>;
   /** Whether there's an image on the clipboard, and in a window on another Mac, where it went there. */
   sendClipboardImage(tabId: string): Promise<{ image: boolean; path?: string }>;
+  /** The session for this window's `miks browse` pages, through its daemon. */
+  browsePartition(): Promise<string>;
   getSettings(): Settings;
   setSettings(changes: Partial<Settings>): void;
   onSettings(listener: (settings: Settings) => void): Unsubscribe;

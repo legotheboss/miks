@@ -1,5 +1,5 @@
 import { colors } from "crosswing/colors";
-import { PanelLayout, PanelLayoutContext } from "crosswing/components/PanelLayout";
+import { PanelLayout, PanelLayoutContext, StyledPanelLayout } from "crosswing/components/PanelLayout";
 import { StyledTextArea, TextArea } from "crosswing/components/forms/TextArea";
 import { fonts } from "crosswing/fonts";
 import { ModalContext } from "crosswing/modals/context";
@@ -22,6 +22,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { styled } from "styled-components";
+import { BrowseView } from "./BrowseView";
 import { daemon } from "./daemon";
 import { FileView } from "./FileView";
 import { renderMarkdown } from "./markdown";
@@ -81,46 +82,66 @@ const sentAs = (prompt: string, sent: string) => {
 };
 
 /**
- * Which tabs have their panel open: each tab's own, like its terminal, and
- * only ever shown while Claude Code runs in it. Kept in this window's
- * storage, so a relaunch leaves them as they were.
+ * Something set for some tabs, by key: kept in this window's storage, so a
+ * relaunch leaves them as they were.
  */
-const openTabs = new Set<string>(readOpenTabs());
-const openListeners = new Set<() => void>();
+function tabFlags(storageKey: string) {
+  const keys = new Set<string>(read());
+  const listeners = new Set<() => void>();
 
-function readOpenTabs(): string[] {
-  try {
-    return JSON.parse(localStorage.getItem("ChatPanel:open") ?? "[]");
-  } catch {
-    return [];
+  function read(): string[] {
+    try {
+      return JSON.parse(localStorage.getItem(storageKey) ?? "[]");
+    } catch {
+      return [];
+    }
   }
-}
 
-export function isChatOpen(tab: Tab): boolean {
-  return openTabs.has(keyOf(tab));
-}
-
-export function setChatOpen(tab: Tab, open: boolean) {
-  const key = keyOf(tab);
-  if (open === openTabs.has(key)) return;
-  if (open) openTabs.add(key);
-  else openTabs.delete(key);
-  try {
-    localStorage.setItem("ChatPanel:open", JSON.stringify([...openTabs]));
-  } catch {}
-  for (const listener of openListeners) listener();
-}
-
-export function useChatOpen(tab: Tab | null): boolean {
-  const key = tab ? keyOf(tab) : null;
-  return useSyncExternalStore(
-    (listener) => {
-      openListeners.add(listener);
-      return () => openListeners.delete(listener);
+  return {
+    has: (tab: Tab) => keys.has(keyOf(tab)),
+    set(tab: Tab, on: boolean) {
+      const key = keyOf(tab);
+      if (on === keys.has(key)) return;
+      if (on) keys.add(key);
+      else keys.delete(key);
+      try {
+        localStorage.setItem(storageKey, JSON.stringify([...keys]));
+      } catch {}
+      for (const listener of listeners) listener();
     },
-    () => !!key && openTabs.has(key),
-  );
+    useFlag(tab: Tab | null): boolean {
+      const key = tab ? keyOf(tab) : null;
+      return useSyncExternalStore(
+        (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+        () => !!key && keys.has(key),
+      );
+    },
+  };
 }
+
+/**
+ * Which tabs have their panel open: each tab's own, like its terminal, and
+ * only ever shown with something in it (Claude Code's conversation, a file,
+ * a page).
+ */
+const openTabs = tabFlags("ChatPanel:open");
+
+/**
+ * Which tabs' panels fill the tab, over the terminal, rather than sitting
+ * beside it (⌘⇧F). One that does fades in and out instead of sliding.
+ */
+const expandedTabs = tabFlags("ChatPanel:expanded");
+
+export const isChatOpen = openTabs.has;
+export const setChatOpen = openTabs.set;
+export const useChatOpen = openTabs.useFlag;
+export const useExpanded = expandedTabs.useFlag;
+
+/** Whether a tab has anything for its panel to show. */
+export const hasPanel = (tab: Tab | null | undefined) => !!(tab?.agent || tab?.file || tab?.page);
 
 /** Set when you open the panel yourself: the composer takes the keyboard. */
 let focusOnShow = false;
@@ -131,6 +152,16 @@ export function toggleChat(tab: Tab) {
   if (open) focusOnShow = true;
   else focusActiveTerminal();
   setChatOpen(tab, open);
+}
+
+/** Makes a tab's panel fill the tab, or go back beside the terminal (⌘⇧F); a hidden one comes back filling it. */
+export function toggleExpanded(tab: Tab) {
+  if (!isChatOpen(tab)) {
+    expandedTabs.set(tab, true);
+    toggleChat(tab);
+  } else {
+    expandedTabs.set(tab, !expandedTabs.has(tab));
+  }
 }
 
 /**
@@ -151,31 +182,36 @@ export function ChatLayout({
   // Open or not is the panel's, apart from what's in it: hiding it (⌘⇧C,
   // Escape) leaves an open file as it was, unsaved changes and all.
   const panelOpen = useChatOpen(tab);
-  const file = tab.file;
-  const visible = panelOpen && (!!tab.agent || !!file);
-  // Chat | file, in a Claude tab with a file open.
-  const [view, setView] = useState<"chat" | "file">("file");
-  const showing = file && (view === "file" || !tab.agent) ? "file" : "chat";
+  const expanded = useExpanded(tab);
+  const { file, page } = tab;
+  const visible = panelOpen && hasPanel(tab);
+  // Which of what it has the panel shows: what you picked, or else the
+  // latest to open (a page, then a file, then the conversation).
+  const [view, setView] = useState<PanelView>("file");
+  const views = panelViews(tab);
+  const showing: PanelView = views.includes(view) ? view : (views.at(-1) ?? "chat");
   const ref = useRef<HTMLDivElement>(null);
 
-  // A file opening (or opened again) comes to the front, opening the panel
-  // if it was closed; and a panel opened for a file closes with it.
-  const fileId = useRef(file?.id);
-  const openedForFile = useRef(false);
+  // A file or page opening (or opened again) comes to the front, opening
+  // the panel if it was closed; and a panel opened for them closes once
+  // they're gone.
+  const opened = useRef({ file: file?.id, page: page?.id });
+  const openedForContent = useRef(false);
   useEffect(() => {
-    if (fileId.current === file?.id) return;
-    fileId.current = file?.id;
-    if (file) {
-      setView("file");
+    const before = opened.current;
+    opened.current = { file: file?.id, page: page?.id };
+    const arrived = page && page.id !== before.page ? "page" : file && file.id !== before.file ? "file" : null;
+    if (arrived) {
+      setView(arrived);
       if (!isChatOpen(tab)) {
-        openedForFile.current = true;
+        openedForContent.current = true;
         setChatOpen(tab, true);
       }
-    } else if (openedForFile.current) {
-      openedForFile.current = false;
+    } else if (!file && !page && openedForContent.current && (before.file || before.page)) {
+      openedForContent.current = false;
       setChatOpen(tab, false);
     }
-  }, [file?.id]);
+  }, [file?.id, page?.id]);
 
   // Coming back to the tab, the keyboard goes back where it was: into the
   // panel, if it was there. And always into the panel when it covers the
@@ -187,17 +223,17 @@ export function ChatLayout({
     returnTo.current = active ? panelFocus.get(tab.id) : undefined;
   }, [active]);
 
-  // Opened yourself (⌘⇧C) with the file showing: the keyboard goes to it.
+  // Opened yourself (⌘⇧C) with a file or page showing: the keyboard goes to it.
   useEffect(() => {
-    if (!visible || !focusOnShow || showing !== "file" || !ref.current) return;
+    if (!visible || !focusOnShow || showing === "chat" || !ref.current) return;
     focusOnShow = false;
-    focusPanel(ref.current, "file");
+    focusPanel(ref.current, showing);
   }, [visible]);
 
   useEffect(() => {
     const root = ref.current;
     if (!active || !visible || !root) return;
-    const overlay = root.querySelector(":scope > [data-mode]")?.getAttribute("data-mode") === "overlay";
+    const overlay = expanded || root.querySelector(":scope > [data-mode]")?.getAttribute("data-mode") === "overlay";
     const where = returnTo.current;
     if (where || overlay) focusPanel(root, where ?? "composer");
   }, [active]);
@@ -205,12 +241,15 @@ export function ChatLayout({
   return (
     <StyledChatLayout
       data-active={active}
+      data-expanded={expanded}
       ref={ref}
       onFocus={(event) => {
         const target = event.target as HTMLElement;
         const where = target.closest(".file-view")
           ? "file"
-          : target.closest(".composer")
+          : target.closest(".page-view")
+            ? "page"
+            : target.closest(".composer")
             ? "composer"
             : target.closest(".scroller")
               ? "conversation"
@@ -237,7 +276,9 @@ export function ChatLayout({
         hideDragHandle
         restorationKey={ChatPanel}
       >
-        <TerminalArea active={active}>{children}</TerminalArea>
+        <TerminalArea active={active} expanded={expanded}>
+          {children}
+        </TerminalArea>
         <ChatPanel
           tab={tab}
           visible={visible}
@@ -255,8 +296,17 @@ export function ChatLayout({
   );
 }
 
+/** What a tab's panel can show. */
+type PanelView = "chat" | "file" | "page";
+
+/** What a tab's panel has to show, in the order they're offered. */
+const panelViews = (tab: Tab): PanelView[] =>
+  [tab.agent && ("chat" as const), tab.file && ("file" as const), tab.page && ("page" as const)].filter(
+    (view): view is PanelView => !!view,
+  );
+
 /** Where in a tab's panel the keyboard can be. */
-type PanelPlace = "composer" | "conversation" | "file";
+type PanelPlace = "composer" | "conversation" | "file" | "page";
 
 /** Where in its panel each tab had the keyboard last, if it was there. */
 const panelFocus = new Map<string, PanelPlace>();
@@ -269,15 +319,18 @@ const panelFocus = new Map<string, PanelPlace>();
 function focusPanel(root: HTMLElement, where: PanelPlace) {
   const shown = <T extends HTMLElement>(element: T | null) => (element?.offsetParent ? element : null);
   const editor = shown(root.querySelector<HTMLElement>(".file-view .cm-content"));
+  const page = shown(root.querySelector<HTMLElement>(".page-view webview"));
   const composer = shown(root.querySelector<HTMLTextAreaElement>(".composer textarea"));
   const conversation = shown(root.querySelector<HTMLElement>(".scroller"));
   const usable = composer && !composer.disabled ? composer : null;
   const target =
-    where === "file"
-      ? (editor ?? usable ?? conversation)
-      : where === "conversation"
-        ? (conversation ?? editor)
-        : (usable ?? editor ?? conversation);
+    where === "page"
+      ? (page ?? editor ?? usable ?? conversation)
+      : where === "file"
+        ? (editor ?? page ?? usable ?? conversation)
+        : where === "conversation"
+          ? (conversation ?? editor ?? page)
+          : (usable ?? editor ?? page ?? conversation);
   target?.focus({ preventScroll: true });
 }
 
@@ -286,9 +339,9 @@ function focusPanel(root: HTMLElement, where: PanelPlace) {
  * have the keyboard, or you'd type behind the shade: the keyboard goes into
  * the panel instead, and back once the panel's gone.
  */
-function TerminalArea({ active, children }: { active: boolean; children: ReactNode }) {
+function TerminalArea({ active, expanded, children }: { active: boolean; expanded: boolean; children: ReactNode }) {
   const { panelVisible, panelMode } = use(PanelLayoutContext);
-  const covered = panelVisible && panelMode === "overlay";
+  const covered = panelVisible && (panelMode === "overlay" || expanded);
   const ref = useRef<HTMLDivElement>(null);
   const wasCovered = useRef(covered);
 
@@ -333,6 +386,36 @@ const StyledChatLayout = styled.div`
   .terminal-area {
     position: relative;
   }
+
+  /* Filling the tab (⌘⇧F): over the terminal, which keeps its size, and
+     fading in and out rather than sliding the whole width. */
+  &[data-expanded="true"] > ${StyledPanelLayout} {
+    > .content[data-panel-edge] {
+      margin: 0;
+    }
+
+    > .overlay[data-panel-edge] {
+      display: none;
+    }
+
+    > .panel[data-panel-edge] {
+      width: 100%;
+      border-left: none;
+      box-shadow: none;
+      transform: none;
+      transition:
+        opacity 0.15s ease-in-out,
+        width 0.2s ease-in-out;
+
+      > .dragger {
+        display: none;
+      }
+    }
+
+    &[data-panel-visible="false"] > .panel[data-panel-edge] {
+      opacity: 0;
+    }
+  }
 `;
 
 /**
@@ -354,29 +437,31 @@ export function ChatPanel({
   tab: Tab;
   visible: boolean;
   supported: boolean;
-  /** The conversation or the tab's file; both stay put while the other shows. */
-  showing: "chat" | "file";
-  onShow: (showing: "chat" | "file") => void;
+  /** The conversation, the tab's file or its page; each stays put while another shows. */
+  showing: PanelView;
+  onShow: (showing: PanelView) => void;
   /** Hides the panel (Escape in the file), leaving what's in it as it is. */
   onHide: () => void;
   /** Whether the file's editor takes the keyboard as it opens (`miks edit`). */
   focusFile: boolean;
 }) {
   const { fontSize } = useSettings();
-  const fileName = tab.file?.path.split("/").pop();
+  const [pageTitle, setPageTitle] = useState("");
+  const views = panelViews(tab);
+  const label = (view: PanelView) =>
+    view === "chat" ? "Chat" : view === "file" ? tab.file?.path.split("/").pop() : pageTitle || hostOf(tab.page?.url);
 
   return (
     // Its text grows and shrinks with the terminal's (⌘= and ⌘-), through
     // the font scale crosswing's fonts all follow.
     <StyledChatPanel data-showing={showing} style={{ "--font-scale": fontSize / DEFAULT_SETTINGS.fontSize } as CSSProperties}>
-      {tab.file && tab.agent && (
+      {views.length > 1 && (
         <div className="switcher">
-          <button data-on={showing === "chat"} onClick={() => onShow("chat")}>
-            Chat
-          </button>
-          <button data-on={showing === "file"} onClick={() => onShow("file")}>
-            {fileName}
-          </button>
+          {views.map((view) => (
+            <button key={view} data-on={showing === view} onClick={() => onShow(view)}>
+              {label(view)}
+            </button>
+          ))}
         </div>
       )}
       {tab.agent && supported && <Conversation tab={tab} visible={visible} />}
@@ -388,9 +473,22 @@ export function ChatPanel({
           <FileView key={tab.file.id} tab={tab} file={tab.file} focusOnOpen={focusFile && tab.file.edit} onHide={onHide} />
         </div>
       )}
+      {tab.page && (
+        <div className="page-view">
+          <BrowseView tab={tab} page={tab.page} onTitle={setPageTitle} />
+        </div>
+      )}
     </StyledChatPanel>
   );
 }
+
+const hostOf = (url = "") => {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+};
 
 type Item =
   | { kind: "prompt"; entry: ChatEntry & { text: string } }
@@ -492,7 +590,7 @@ function Conversation({ tab, visible }: { tab: Tab; visible: boolean }) {
   // by closing the panel.
   const { panelMode } = use(PanelLayoutContext);
   function leave() {
-    if (panelMode === "overlay") setChatOpen(tab, false);
+    if (panelMode === "overlay" || expandedTabs.has(tab)) setChatOpen(tab, false);
     else focusActiveTerminal();
   }
 
@@ -813,6 +911,7 @@ function ToolCalls({ entries }: { entries: Extract<ChatEntry, { kind: "tool" }>[
 }
 
 const StyledChatPanel = styled.div`
+  position: relative;
   display: flex;
   flex-flow: column;
   min-height: 0;
@@ -821,14 +920,24 @@ const StyledChatPanel = styled.div`
   font: ${fonts.display({ size: 14, line: "23px" })};
 
   /* Whichever isn't showing stays, hidden, so it's as you left it. */
-  &[data-showing="file"] > .scroller,
-  &[data-showing="file"] > .composer,
-  &[data-showing="file"] > .note,
-  &[data-showing="chat"] > .file-view {
+  &:not([data-showing="chat"]) > .scroller,
+  &:not([data-showing="chat"]) > .composer,
+  &:not([data-showing="chat"]) > .note,
+  &:not([data-showing="file"]) > .file-view {
     display: none;
   }
 
-  > .file-view {
+  /* A page hidden keeps its size: a webview shrunk to nothing (display:
+     none) lays its page out again, at nothing, and back. */
+  &:not([data-showing="page"]) > .page-view {
+    position: absolute;
+    inset: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  > .file-view,
+  > .page-view {
     flex-grow: 1;
     min-height: 0;
     display: flex;

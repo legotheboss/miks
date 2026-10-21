@@ -8,6 +8,8 @@ import { WebSocket, WebSocketServer } from "ws";
 import type { ClientMessage, DaemonMessage } from "../shared/protocol.ts";
 import type { PaneViewer } from "./Pane.ts";
 import { checkPermissions, permissionsApp, requestPermission } from "./Permissions.ts";
+import { browseUrl } from "../shared/browse.ts";
+import { isProxyRequest, proxyConnect, proxyRequest } from "./Proxy.ts";
 import { type SavedState, Workspaces } from "./Workspaces.ts";
 
 export type Daemon = {
@@ -73,6 +75,9 @@ export async function serve({
   let stopWhenIdle = false;
 
   const server = http.createServer((req, res) => {
+    // The panel's browser, going out from this Mac (Proxy.ts).
+    if (isProxyRequest(req)) return proxyRequest(req, res);
+
     const url = new URL(req.url ?? "/", "http://miks");
 
     if (req.method === "GET" && url.pathname === "/api/ping") {
@@ -118,6 +123,18 @@ export async function serve({
       });
     }
 
+    // `miks browse`: the body is what it was given, a URL or nearly.
+    if (req.method === "POST" && url.pathname === "/api/browse") {
+      const pane = url.searchParams.get("pane") ?? "";
+      return readText(req).then((input) => {
+        if (!workspaces.getPane(pane)) return json(res, 404, { message: "No such tab." });
+        const address = browseUrl(input);
+        if (!address) return json(res, 400, { message: `Not a web address: ${input}` });
+        workspaces.openPage(pane, address);
+        json(res, 200, { url: address });
+      });
+    }
+
     if (req.method === "POST" && url.pathname === "/api/drop") {
       const pane = workspaces.getPane(url.searchParams.get("pane") ?? "");
       const into = url.searchParams.get("into");
@@ -144,6 +161,8 @@ export async function serve({
   //
   // UI connections.
   //
+
+  server.on("connect", proxyConnect);
 
   const wss = new WebSocketServer({ server, path: "/ws" });
 
@@ -267,6 +286,8 @@ export async function serve({
         }
         case "closeFile":
           return workspaces.closeFile(message.tabId);
+        case "closePage":
+          return workspaces.closePage(message.tabId);
         case "input":
           return workspaces.getPane(message.tabId)?.write(message.data);
         case "clear":

@@ -1,10 +1,10 @@
 import { colors } from "crosswing/colors";
 import { fonts } from "crosswing/fonts";
-import { PanelRight, Plus, RotateCw, X } from "lucide-react";
+import { Maximize2, Minimize2, PanelRight, Plus, RotateCw, X } from "lucide-react";
 import type { Tab, Workspace } from "miks/shared/protocol";
 import { Fragment, HTMLAttributes } from "react";
 import { styled } from "styled-components";
-import { toggleChat, useChatOpen } from "./ChatPanel";
+import { hasPanel, toggleChat, toggleExpanded, useChatOpen, useExpanded } from "./ChatPanel";
 import { closeTab } from "./closing";
 import { daemon } from "./daemon";
 import { useDraggable } from "crosswing/components/draggable/useDraggable";
@@ -18,6 +18,7 @@ const DRAG_GROUP = "tabs";
 export function TabBar({ workspace, ...rest }: HTMLAttributes<HTMLDivElement> & { workspace: Workspace }) {
   const activeTab = workspace.tabs.find((tab) => tab.id === workspace.activeTabId);
   const chatOpen = useChatOpen(activeTab ?? null);
+  const expanded = useExpanded(activeTab ?? null);
 
   // Press and hold a tab to drag it along the bar.
   useDraggable({
@@ -47,8 +48,22 @@ export function TabBar({ workspace, ...rest }: HTMLAttributes<HTMLDivElement> & 
         <Plus />
       </button>
       <div className="spacer" />
-      {/* The tab's panel: its conversation, while Claude Code runs in it, or a file. */}
-      {(activeTab?.agent || activeTab?.file) && (
+      {/* The tab's panel filling the tab, or beside the terminal. */}
+      {activeTab && hasPanel(activeTab) && chatOpen && (
+        <button
+          className="expand-toggle"
+          data-on={expanded}
+          onClick={() => toggleExpanded(activeTab)}
+          {...tooltip(expanded ? "Put the panel beside the terminal" : "Fill the tab with the panel", {
+            hotkey: "cmd+shift+f",
+            delay: true,
+          })}
+        >
+          {expanded ? <Minimize2 /> : <Maximize2 />}
+        </button>
+      )}
+      {/* The tab's panel: its conversation, while Claude Code runs in it, a file or a page. */}
+      {activeTab && hasPanel(activeTab) && (
         <button
           className="chat-toggle"
           data-on={chatOpen}
@@ -77,6 +92,7 @@ export const StyledTabBar = styled.div`
   }
 
   > .new-tab,
+  > .expand-toggle,
   > .chat-toggle {
     display: flex;
     align-items: center;
@@ -100,8 +116,13 @@ export const StyledTabBar = styled.div`
     }
   }
 
+  > .expand-toggle > svg {
+    width: 14px;
+    height: 14px;
+  }
+
   > .chat-toggle {
-    margin: 0 2px 0 6px;
+    margin: 0 2px 0 2px;
 
     &[data-on="true"] {
       color: ${colors.text()};

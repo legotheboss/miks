@@ -9,6 +9,7 @@ import {
   type ChatEntry,
   type DaemonState,
   type OpenFile,
+  type OpenPage,
   PROTOCOL_VERSION,
   type Tab,
 } from "../shared/protocol.ts";
@@ -81,6 +82,8 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     string,
     { file: OpenFile; listeners: Set<FileListener>; waiters: Set<() => void>; onDisk?: () => void }
   >();
+  /** The page in each tab's panel (`miks browse`). */
+  private readonly pages = new Map<string, OpenPage>();
   /** Each tab's own shell history file's name, kept across restores. */
   private readonly historyIds = new Map<string, string>();
   /** Each tab's shell's directory, as of the last `pollCwds`. */
@@ -667,6 +670,17 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     if (readNow) tell();
   }
 
+  /** Shows a web page in the tab's panel, in place of any it had. */
+  openPage(tabId: string, url: string) {
+    if (!this.panes.has(tabId)) return;
+    this.pages.set(tabId, { id: randomUUID().slice(0, 8), url });
+    this.emit("change");
+  }
+
+  closePage(tabId: string) {
+    if (this.pages.delete(tabId)) this.emit("change");
+  }
+
   /** Ends every pane. For tests; the real daemon just exits. */
   killAll() {
     this.stopping = true;
@@ -687,6 +701,7 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
       running: this.panes.get(id)?.running() ?? null,
       kept: this.keeps.has(id) || !!this.resumableSession(id),
       file: this.files.get(id)?.file,
+      page: this.pages.get(id),
     };
   }
 
@@ -704,6 +719,7 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     this.chats.get(tabId)?.transcript?.close();
     this.chats.delete(tabId);
     this.closeFile(tabId);
+    this.pages.delete(tabId);
     this.cwds.delete(tabId);
 
     const workspace = this.workspaces.find((w) => w.tabIds.includes(tabId));
