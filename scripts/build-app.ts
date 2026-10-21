@@ -43,10 +43,11 @@ export async function buildApp(): Promise<string> {
       filter: (file) => !file.endsWith(".test.ts"),
     });
 
-  copy("packages/app/main.ts");
-  copy("packages/app/claudeHooks.ts");
-  copy("packages/app/updates.ts");
-  copy("packages/app/tunnels.ts");
+  // Every module of the main process (a new one left out once meant a Miks
+  // that couldn't start), but not the dev launcher.
+  for (const file of fs.readdirSync(path.join(root, "packages/app"))) {
+    if (file.endsWith(".ts") && !file.endsWith(".test.ts") && file !== "dev.ts") copy(`packages/app/${file}`);
+  }
   copy("packages/daemon/hooks");
   copy("packages/daemon/shell");
   copy("packages/app/preload.cjs");
