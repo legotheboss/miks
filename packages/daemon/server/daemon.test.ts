@@ -419,6 +419,17 @@ test("a new tab starts where the current one is", async () => {
   expect(await daemon.workspaces.getPane(newTabId)!.cwd()).toBe(fs.realpathSync(subdir));
 });
 
+test("a new tab goes just right of the current one", async () => {
+  daemon.workspaces.createWorkspace({ cwd: home });
+  const workspaceId = daemon.workspaces.getState().workspaces[0].id;
+  const first = activeTab(daemon.workspaces.getState());
+  const last = daemon.workspaces.createTab(workspaceId)!;
+  daemon.workspaces.select(workspaceId, first);
+
+  const newTabId = (await daemon.workspaces.newTab(workspaceId))!;
+  expect(daemon.workspaces.getState().workspaces[0].tabs.map((tab) => tab.id)).toEqual([first, newTabId, last]);
+});
+
 test("zsh reads your startup files, gives ZDOTDIR back, and marks each command", async () => {
   for (const file of [".zshenv", ".zprofile", ".zshrc", ".zlogin"]) {
     fs.writeFileSync(path.join(home, file), `MIKS_TEST_READ="$MIKS_TEST_READ ${file}"\n`);

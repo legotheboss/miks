@@ -183,14 +183,15 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
   }
 
   /**
-   * A new tab where you are: in the current tab's directory, asked of its
-   * shell just now (the poll's could be seconds old), or the workspace's.
+   * A new tab where you are: just right of the current tab, in its
+   * directory, asked of its shell just now (the poll's could be seconds
+   * old), or the workspace's.
    */
   async newTab(workspaceId: string): Promise<string | undefined> {
     const activeTabId = this.findWorkspace(workspaceId)?.activeTabId;
     const pane = activeTabId ? this.panes.get(activeTabId) : undefined;
     const cwd = (await pane?.cwd()) ?? (activeTabId ? this.cwds.get(activeTabId) : undefined);
-    return this.createTab(workspaceId, { cwd });
+    return this.createTab(workspaceId, { cwd, after: activeTabId ?? undefined });
   }
 
   createTab(
@@ -200,7 +201,8 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
       resumeClaudeSession,
       keep,
       historyId = randomUUID(),
-    }: { cwd?: string; resumeClaudeSession?: string; keep?: string; historyId?: string } = {},
+      after,
+    }: { cwd?: string; resumeClaudeSession?: string; keep?: string; historyId?: string; after?: string } = {},
   ): string | undefined {
     const workspace = this.findWorkspace(workspaceId);
     if (!workspace) return;
@@ -221,7 +223,9 @@ export class Workspaces extends EventEmitter<{ change: [] }> {
     this.panes.set(id, pane);
     this.historyIds.set(id, historyId);
     if (keep) this.keeps.set(id, { command: keep, seenRunning: false });
-    workspace.tabIds.push(id);
+    // After the tab named, or at the end.
+    const index = after ? workspace.tabIds.indexOf(after) : -1;
+    workspace.tabIds.splice(index === -1 ? workspace.tabIds.length : index + 1, 0, id);
     workspace.activeTabId = id;
 
     pane.on("title", (title, previous) => {
